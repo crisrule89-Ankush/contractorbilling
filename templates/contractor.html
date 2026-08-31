@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contractor Master | Escon Management System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        body { background: #f4f6f9; font-family: Segoe UI, sans-serif; }
+        .navbar { background: #003366; }
+        .navbar-brand { color: white !important; font-size: 24px; font-weight: bold; }
+        .user-info { color: white; text-align: right; font-size: 14px; }
+        .page-title { background: white; padding: 20px; border-radius: 10px; margin-top: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); margin-bottom: 20px; }
+        .card-header { background: #0B5394; color: white; font-size: 18px; font-weight: bold; }
+        .form-label { font-weight: 600; }
+        .required { color: red; }
+        input, select { height: 42px; }
+        .btn-custom { min-width: 140px; }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+    <div class="container-fluid">
+        <span class="navbar-brand"><i class="fa-solid fa-building"></i> {{ app_settings.brand_name }}</span>
+        <div class="user-info">
+            <b>{{username}}</b><br>{{branch}}
+        </div>
+    </div>
+</nav>
+<div class="container-fluid px-4">
+    <div class="page-title">
+        <h3><i class="fa-solid fa-users"></i> Contractor Master</h3>
+        <p class="text-muted">Create / Update / Search Contractor Details</p>
+    </div>
+    <div id="alertContainer"></div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, msg in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+    <form id="contractorForm" action="/save_contractor" method="POST">
+        <div class="card">
+            <div class="card-header">General Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Contractor Code</label>
+                        <input type="text" id="contractor_code" name="ContractorCode" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Main Branch <span class="required">*</span></label>
+                        {% if can_edit_branch %}
+                        <select id="branch" name="MainBranch" class="form-select">
+                            <option value="">Select Branch</option>
+                            {% for option in branch_options %}
+                            <option value="{{ option }}" {% if option == branch %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" id="branch" name="MainBranch" class="form-control" value="{{branch}}" readonly>
+                        {% endif %}
+                    </div>
+                    {% set work_type_options = field_configs.WorkType.options.split('\n') if field_configs.WorkType.options else ['General', 'Installation', 'Maintenance', 'Repair', 'Modernization', 'AMC'] %}
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">{{ field_configs.WorkType.label }} <span class="required">*</span></label>
+                        <select id="work_type" name="WorkType" class="form-select">
+                            <option value="">Select {{ field_configs.WorkType.label }}</option>
+                            {% for option in work_type_options %}
+                            <option>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Ledger Code</label>
+                        <input type="text" id="ledger_code" name="LedgerCode" class="form-control">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Ledger Name <span class="required">*</span></label>
+                        <input type="text" id="ledger_name" name="LedgerName" class="form-control">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Owner Name</label>
+                        <input type="text" id="owner_name" name="OwnerName" class="form-control">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Group Name</label>
+                        <input type="text" id="group_name" name="GroupName" class="form-control">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Mailing Name</label>
+                        <input type="text" id="mailing_name" name="MailingName" class="form-control">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><i class="fa-solid fa-location-dot"></i> Address Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Address 1 <span class="required">*</span></label>
+                        <input type="text" id="address1" name="Address1" class="form-control" maxlength="200" placeholder="Enter Address Line 1">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Address 2</label>
+                        <input type="text" id="address2" name="Address2" class="form-control" maxlength="200" placeholder="Enter Address Line 2">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">State <span class="required">*</span></label>
+                        <select id="state" name="StateName" class="form-select">
+                            <option value="">Select State</option>
+                            <option>Maharashtra</option>
+                            <option>Delhi</option>
+                            <option>Karnataka</option>
+                            <option>Gujarat</option>
+                            <option>Tamil Nadu</option>
+                            <option>Telangana</option>
+                            <option>Andhra Pradesh</option>
+                            <option>Kerala</option>
+                            <option>West Bengal</option>
+                            <option>Odisha</option>
+                            <option>Uttar Pradesh</option>
+                            <option>Punjab</option>
+                            <option>Haryana</option>
+                            <option>Rajasthan</option>
+                            <option>Madhya Pradesh</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Pin Code</label>
+                        <input type="text" id="pincode" name="PinCode" class="form-control" maxlength="6" placeholder="Pin Code">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><i class="fa-solid fa-phone"></i> Contact Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Contact Person</label>
+                        <input type="text" id="contactperson" name="ContactPerson" class="form-control" maxlength="100">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Phone No</label>
+                        <input type="text" id="phone" name="PhoneNo" class="form-control" maxlength="15">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Mobile No <span class="required">*</span></label>
+                        <input type="text" id="mobile" name="MobileNo" class="form-control" maxlength="10">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Email ID</label>
+                        <input type="email" id="email" name="EmailID" class="form-control" maxlength="100">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><i class="fa-solid fa-file-invoice"></i> Tax Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">PAN No <span class="required">*</span></label>
+                        <input type="text" id="pan" name="PANNo" class="form-control" maxlength="10" style="text-transform:uppercase;">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">GST Applicable</label>
+                        <select id="gst_applicable" name="GSTApplicable" class="form-select">
+                            <option>No</option>
+                            <option>Yes</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">GST Registration Type</label>
+                        <select id="gst_type" name="GSTRegistrationType" class="form-select">
+                            <option value="">Select</option>
+                            <option>Regular</option>
+                            <option>Composition</option>
+                            <option>Unregistered</option>
+                            <option>Consumer</option>
+                            <option>SEZ</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">GSTIN/UIN</label>
+                        <input type="text" id="gstin" name="GSTIN" class="form-control" maxlength="15" style="text-transform:uppercase;">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">TDS Applicable</label>
+                        <select id="tds_applicable" name="TDSApplicable" class="form-select">
+                            <option>No</option>
+                            <option>Yes</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Deductee Type</label>
+                        <select id="deductee_type" name="DeducteeType" class="form-select">
+                            <option value="">Select</option>
+                            <option>Company</option>
+                            <option>Individual</option>
+                            <option>Partnership</option>
+                            <option>Proprietorship</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Deduct TDS in Same Voucher</label>
+                        <select id="samevoucher" name="DeductTDSSameVoucher" class="form-select">
+                            <option>No</option>
+                            <option>Yes</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Ignore Surcharge Exemption</label>
+                        <select id="surcharge" name="IgnoreSurcharge" class="form-select">
+                            <option>No</option>
+                            <option>Yes</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><i class="fa-solid fa-building-columns"></i> Bank Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Account Number</label>
+                        <input type="text" id="accountno" name="AccountNumber" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">IFSC Code</label>
+                        <input type="text" id="ifsc" name="IFSCCode" class="form-control" style="text-transform:uppercase;">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bank Name</label>
+                        <input type="text" id="bankname" name="BankName" class="form-control">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Bank Ref ID</label>
+                        <input type="text" id="bankref" name="BankRefID" class="form-control">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Bank Transaction Type</label>
+                        <select id="banktype" name="BankTransactionType" class="form-select">
+                            <option value="">Select</option>
+                            <option>NEFT</option>
+                            <option>RTGS</option>
+                            <option>IMPS</option>
+                            <option>UPI</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><i class="fa-solid fa-gears"></i> Other Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Billwise Applicable</label>
+                        <select id="billwise" name="BillwiseApplicable" class="form-select">
+                            <option>Yes</option>
+                            <option>No</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Credit Period</label>
+                        <input type="number" id="creditperiod" name="CreditPeriod" class="form-control">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Party Type</label>
+                        <select id="partytype" name="PartyType" class="form-select">
+                            <option value="">Select</option>
+                            <option>Contractor</option>
+                            <option>Vendor</option>
+                            <option>Supplier</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">E-Commerce Operator</label>
+                        <select id="ecommerce" name="EcommerceOperator" class="form-select">
+                            <option>No</option>
+                            <option>Yes</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Cross Using</label>
+                        <input type="text" id="crossusing" name="CrossUsing" class="form-control">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body text-center">
+                <button type="button" class="btn btn-primary btn-lg me-2 btn-custom" id="btnNew"><i class="fa fa-plus"></i> New</button>
+                <button type="submit" class="btn btn-success btn-lg me-2 btn-custom" id="btnSave" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-save"></i> Save</button>
+                <button type="button" class="btn btn-warning btn-lg me-2 btn-custom" id="btnUpdate" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-edit"></i> Update</button>
+                <button type="button" class="btn btn-danger btn-lg me-2 btn-custom" id="btnDelete" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-trash"></i> Delete</button>
+                <button type="button" class="btn btn-info btn-lg me-2 btn-custom" id="btnSearch"><i class="fa fa-search"></i> Search</button>
+                <button type="reset" class="btn btn-secondary btn-lg me-2 btn-custom"><i class="fa fa-eraser"></i> Clear</button>
+                <a href="/dashboard" class="btn btn-dark btn-lg btn-custom"><i class="fa fa-arrow-left"></i> Back</a>
+            </div>
+        </div>
+    </form>
+</div>
+<div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="searchModalLabel">Search Contractor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <select id="searchBy" class="form-select">
+                            <option value="ContractorCode">Contractor Code</option>
+                            <option value="LedgerName">Ledger Name</option>
+                            <option value="OwnerName">Owner Name</option>
+                            <option value="PANNo">PAN No</option>
+                            <option value="MobileNo">Mobile No</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <input type="text" id="searchTerm" class="form-control" placeholder="Enter search value">
+                    </div>
+                    <div class="col-md-2 d-grid">
+                        <button type="button" class="btn btn-primary" id="btnRunSearch">Search</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Contractor Code</th>
+                                <th>Ledger Name</th>
+                                <th>Owner Name</th>
+                                <th>Mobile No</th>
+                                <th>Main Branch</th>
+                                <th>Work Type</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="searchResults">
+                            <tr><td colspan="7" class="text-center text-muted">Enter search criteria and click Search.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    window.hiddenFormFields = {{ hidden_fields | tojson }};
+    window.formFieldSettings = {{ field_settings | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/form_fields.js') }}"></script>
+<script src="{{ url_for('static', filename='js/contractor.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Billing Schedule | Escon Management System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        body { background: #f4f6f9; font-family: Segoe UI, sans-serif; }
+        .navbar { background: #003366; }
+        .navbar-brand { color: white !important; font-size: 24px; font-weight: bold; }
+        .user-info { color: white; text-align: right; font-size: 14px; }
+        .page-title { background: white; padding: 20px; border-radius: 10px; margin-top: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+        .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); margin-bottom: 20px; }
+        .card-header { background: #0B5394; color: white; font-size: 18px; font-weight: bold; }
+        .form-label { font-weight: 600; }
+        .required { color: red; }
+        input, select { height: 42px; }
+        .action-bar { position: sticky; top: 0; z-index: 1020; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+        .action-bar .btn { min-width: 110px; }
+        .btn-custom { min-width: 140px; }
+        .section-title { margin-bottom: 1rem; font-size: 1rem; font-weight: 700; color: #003366; }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+    <div class="container-fluid">
+        <span class="navbar-brand"><i class="fa-solid fa-building"></i> {{ app_settings.brand_name }}</span>
+        <div class="user-info">
+            <b>{{username}}</b><br>{{branch}}
+        </div>
+    </div>
+</nav>
+<div class="container-fluid px-4">
+    <div class="page-title">
+        <h3><i class="fa-solid fa-file-invoice-dollar"></i> Billing Schedule</h3>
+        <p class="text-muted">Create and manage billing entries with the same familiar workflow as Contractor Master.</p>
+    </div>
+
+    <div id="alertContainer"></div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, msg in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+    <form id="billingForm" action="/save_billing" method="POST">
+        <input type="hidden" id="billing_id" name="BillingID">
+        <input type="hidden" id="original_unique_key" name="OriginalUniquekey">
+        <input type="hidden" id="original_contractor_code" name="OriginalContractorCode">
+        <input type="hidden" id="original_bill_no" name="OriginalBillNoDebRemarks">
+        <div class="card action-bar mb-3">
+            <div class="card-body text-center py-3">
+                <button type="button" id="btnNew" class="btn btn-primary me-2 btn-custom"><i class="fa fa-plus"></i> New</button>
+                <button type="submit" id="btnSave" class="btn btn-success me-2 btn-custom" {% if not can_save_billing %}disabled title="Login required"{% endif %}><i class="fa fa-save"></i> Save</button>
+                <button type="button" id="btnUpdate" class="btn btn-warning me-2 btn-custom" {% if not can_save_billing %}disabled title="Login required"{% endif %}><i class="fa fa-edit"></i> Update</button>
+                {% if can_delete_billing %}
+                <button type="button" id="btnDelete" class="btn btn-danger me-2 btn-custom"><i class="fa fa-trash"></i> Delete</button>
+                {% endif %}
+                <button type="button" id="btnSearchBilling" class="btn btn-info me-2 btn-custom"><i class="fa fa-search"></i> Search</button>
+                <button type="reset" class="btn btn-secondary me-2 btn-custom"><i class="fa fa-eraser"></i> Clear</button>
+                <a href="/dashboard" class="btn btn-dark btn-custom"><i class="fa fa-arrow-left"></i> Back</a>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">Basic Billing Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Branch Name <span class="required">*</span></label>
+                        {% if can_select_branch %}
+                        <select id="branch_name" name="BranchName" class="form-select">
+                            {% for option in branch_options %}
+                            <option value="{{ option }}" {% if option == branch %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" id="branch_name" name="BranchName" class="form-control" value="{{branch}}" readonly>
+                        {% endif %}
+                    </div>
+                    {% if 'ContractorLocation' not in hidden_fields %}
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Contractor Location</label>
+                        <input type="text" id="contractor_location" name="ContractorLocation"
+                               class="form-control" placeholder="From contractor code" readonly>
+                    </div>
+                    {% endif %}
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Contractor Code <span class="required">*</span></label>
+                        <div class="input-group">
+                            <input type="text" id="contractor_code" name="ContractorCode" class="form-control" style="text-transform:uppercase;">
+                            <button type="button" id="btnFetchContractor" class="btn btn-outline-primary">
+                                <i class="fa fa-sync"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Contractor Agency Name <span class="required">*</span></label>
+                        <input type="text" id="agency_name" name="ContractorAgencyName" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Contractor Email ID</label>
+                        <input type="email" id="contractor_email" name="ContractorEmailID" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Contractor Contact No <span class="required">*</span></label>
+                        <input type="text" id="contractor_contact" name="ContractorContactNo" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Owner Name</label>
+                        <input type="text" id="owner_name" name="OwnerName" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">LO Number / Cr Remarks</label>
+                        <input type="text" id="lo_number" name="LONumberCrRemarks" class="form-control">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label">Site Name / Project Name</label>
+                        <input type="text" id="site_project" name="SiteProjectName" class="form-control">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Work & Voucher Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Voucher Type</label>
+                        <input type="text" id="voucher_type" name="VoucherType" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Work Order No</label>
+                        <input type="text" id="work_order_no" name="WorkOrderNo" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Work Order Date</label>
+                        <input type="date" id="work_order_date" name="WorkOrderDate" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">TCV Value</label>
+                        <input type="number" id="tcv_value" name="TCVValue" class="form-control" step="0.01">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Sent Date</label>
+                        <input type="date" id="bill_sent_date" name="BillSentDate" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill No / Deb Remarks <span class="required">*</span></label>
+                        <input type="text" id="bill_no" name="BillNoDebRemarks" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Date <span class="required">*</span></label>
+                        <input type="date" id="bill_date" name="BillDate" class="form-control">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Amount <span class="required">*</span></label>
+                        <input type="number" id="bill_amount" name="BillAmount" class="form-control" step="0.01">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Stage</label>
+                        <select id="bill_stage" name="BillStage" class="form-select">
+                            <option value="" selected></option>
+                            <option>Draft</option>
+                            <option>Submitted</option>
+                            <option>Approved</option>
+                            <option>Paid</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Recd Date</label>
+                        <input type="date" id="bill_recd_date" name="BillRecdDate" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Project Payment</label>
+                        <input type="text" id="project_payment" name="ProjectPayment" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Zoho doc</label>
+                        <input type="text" id="zoho_doc" name="ZohoDoc" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Tally Name</label>
+                        <input type="text" id="tally_name" name="TallyName" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Inst Remarks</label>
+                        <input type="text" id="inst_remarks" name="InstRemarks" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Given HOD</label>
+                        <input type="text" id="bill_given_hod" name="BillGivenHOD" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Recd From HOD</label>
+                        <input type="text" id="bill_recd_hod" name="BillRecdFromHOD" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bill Submitted to Acct Date</label>
+                        <input type="date" id="bill_submitted_acct_date" name="BillSubmittedToAcctDate" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Bank & Tax Details</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Account Number</label>
+                        <input type="text" id="account_number" name="AccountNumber" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Bank Name</label>
+                        <input type="text" id="bank_name" name="BankName" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">IFSC Code</label>
+                        <input type="text" id="ifsc_code" name="IFSCCode" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">PAN Number</label>
+                        <input type="text" id="pan_number" name="PANNumber" class="form-control" style="text-transform:uppercase;" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">TDS</label>
+                        <input type="text" id="tds" name="TDS" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">EWT</label>
+                        <input type="text" id="ewt" name="EWT" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">GST</label>
+                        <input type="text" id="gst" name="GST" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Payable Amount</label>
+                        <input type="number" id="payable_amount" name="PayableAmount" class="form-control" step="0.01" readonly>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Payment Date</label>
+                        <input type="date" id="payment_date" name="PaymentDate" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">UTR Number</label>
+                        <input type="text" id="utr_number" name="UTRNumber" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Status Info</label>
+                        <input type="text" id="status_info" name="StatusInfo" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Acct Remarks</label>
+                        <input type="text" id="acct_remarks" name="AcctRemarks" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </form>
+</div>
+<div class="modal fade" id="billingSearchModal" tabindex="-1" aria-labelledby="billingSearchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="billingSearchModalLabel">Search Billing Entry</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-10">
+                        <input type="text" id="billingSearchTerm" class="form-control" placeholder="Enter unique key">
+                    </div>
+                    <div class="col-md-2 d-grid">
+                        <button type="button" class="btn btn-primary" id="btnRunBillingSearch">Search</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Unique Key</th>
+                                <th>Contractor Code</th>
+                                <th>Agency Name</th>
+                                <th>Bill No / Deb Remarks</th>
+                                <th>Bill Date</th>
+                                <th>Bill Amount</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="billingSearchResults">
+                            <tr><td colspan="7" class="text-center text-muted">Enter unique key and click Search.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    window.billingPermissions = { canEditBillingTracking: {{ 'true' if can_edit_billing_tracking else 'false' }} };
+    window.hiddenFormFields = {{ hidden_fields | tojson }};
+    window.formFieldSettings = {{ field_settings | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/form_fields.js') }}"></script>
+<script src="{{ url_for('static', filename='js/billing.js') }}"></script>
+</body>
+</html>

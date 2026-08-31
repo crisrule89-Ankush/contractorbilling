@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ app_settings.brand_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Segoe UI", sans-serif; }
+        body { background: #f3f6fa; color: #172033; overflow-x: hidden; }
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 260px;
+            height: 100%;
+            background: #003366;
+            color: white;
+        }
+        .logo {
+            padding: 25px;
+            text-align: center;
+            font-size: 22px;
+            font-weight: 800;
+            border-bottom: 1px solid rgba(255,255,255,.18);
+        }
+        .logo i { font-size: 38px; margin-bottom: 10px; display: block; }
+        .sidebar a {
+            display: block;
+            padding: 16px 25px;
+            color: white;
+            text-decoration: none;
+            transition: .2s;
+        }
+        .sidebar a:hover { background: #0b5394; padding-left: 34px; }
+        .main { margin-left: 260px; min-height: 100vh; }
+        .topbar {
+            min-height: 70px;
+            background: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+            padding: 0 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.08);
+        }
+        .user { text-align: right; color: #536176; }
+        .content { padding: 32px 40px 24px; }
+        .main-page-image {
+            width: 100%;
+            max-height: 300px;
+            object-fit: cover;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(15,23,42,.12);
+            margin-bottom: 24px;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 18px;
+            margin-bottom: 24px;
+        }
+        .stat-card,
+        .action-card,
+        .data-panel {
+            background: white;
+            border: 1px solid #e0e8f2;
+            border-radius: 8px;
+            box-shadow: 0 8px 22px rgba(15,23,42,.06);
+        }
+        .stat-card { padding: 22px; }
+        .stat-card i {
+            width: 46px;
+            height: 46px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            margin-bottom: 14px;
+            color: white;
+            background: #0b65c9;
+        }
+        .stat-label { color: #617086; font-weight: 700; font-size: 14px; }
+        .stat-value { font-size: 34px; font-weight: 800; line-height: 1.1; }
+        .action-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+            margin-bottom: 24px;
+        }
+        .action-card {
+            padding: 24px;
+            cursor: pointer;
+            transition: .2s;
+        }
+        .action-card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(15,23,42,.1); }
+        .action-card i { color: #0b65c9; font-size: 34px; margin-bottom: 14px; }
+        .action-card h4 { font-size: 20px; margin-bottom: 6px; font-weight: 800; }
+        .action-card p { color: #65758a; margin-bottom: 0; }
+        .export-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 18px;
+        }
+        .export-actions .btn { font-weight: 700; }
+        .panel-grid {
+            display: grid;
+            grid-template-columns: {% if show_branch_summary %}minmax(280px, .8fr) minmax(420px, 1.2fr){% else %}1fr{% endif %};
+            gap: 18px;
+        }
+        .data-panel { overflow: hidden; }
+        .panel-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 18px 20px;
+            border-bottom: 1px solid #e0e8f2;
+        }
+        .panel-heading h5 { margin: 0; font-weight: 800; }
+        .table { margin-bottom: 0; }
+        .table th { color: #536176; font-size: 13px; text-transform: uppercase; }
+        .empty-state { padding: 28px; color: #718096; text-align: center; }
+        .footer { text-align: center; padding: 20px; color: #718096; }
+        @media (max-width: 1100px) {
+            .summary-grid,
+            .action-grid,
+            .panel-grid { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 760px) {
+            .sidebar { position: static; width: 100%; height: auto; }
+            .main { margin-left: 0; }
+            .content { padding: 22px 16px; }
+            .summary-grid,
+            .action-grid,
+            .panel-grid { grid-template-columns: 1fr; }
+            .topbar { align-items: flex-start; flex-direction: column; padding: 18px; }
+            .user { text-align: left; }
+        }
+    </style>
+</head>
+<body>
+<div class="sidebar">
+    <div class="logo" style="text-align:center;">
+        <img src="{{ url_for('static', filename='images/escon-name-transparent.png') }}" alt="Escon Logo" style="max-width:200px; display:block; margin:6px auto;">
+    </div>
+    <a href="/dashboard"><i class="fa fa-home"></i> Dashboard</a>
+    <a href="/contractor"><i class="fa fa-users"></i> Contractor Master</a>
+    <a href="/billing"><i class="fa fa-file-invoice-dollar"></i> Billing Schedule</a>
+    {% if can_bulk_upload %}
+    <a href="/bulk_upload"><i class="fa fa-upload"></i> Upload Bulk Entry</a>
+    {% endif %}
+    {% if is_admin %}
+    <a href="/field_manager"><i class="fa fa-sliders"></i> Form Fields</a>
+    <a href="/branding_settings"><i class="fa fa-image"></i> Branding</a>
+    {% endif %}
+    <a href="/reports"><i class="fa fa-chart-line"></i> Reports</a>
+    <a href="/logout"><i class="fa fa-sign-out-alt"></i> Logout</a>
+</div>
+
+<div class="main">
+    <div class="topbar">
+        <h4><i class="fa-solid fa-house"></i> Dashboard</h4>
+        <div class="user"><b>{{ username }}</b><br>{{ branch }}</div>
+    </div>
+
+    <div class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, msg in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% if app_settings.main_image_url %}
+        <img src="{{ app_settings.main_image_url }}" class="main-page-image" alt="{{ app_settings.brand_name }}">
+        {% endif %}
+
+        <div class="summary-grid">
+            <div class="stat-card">
+                <i class="fa-solid fa-users"></i>
+                <div class="stat-label">Total Contractors</div>
+                <div class="stat-value">{{ dashboard_stats.total_contractors }}</div>
+            </div>
+            <div class="stat-card">
+                <i class="fa-solid fa-file-invoice-dollar"></i>
+                <div class="stat-label">Total Bills</div>
+                <div class="stat-value">{{ dashboard_stats.total_bills }}</div>
+            </div>
+            <div class="stat-card">
+                <i class="fa-solid fa-code-branch"></i>
+                <div class="stat-label">Summary Scope</div>
+                <div class="stat-value" style="font-size:26px;">{{ dashboard_stats.scope_label }}</div>
+            </div>
+            <div class="stat-card">
+                <i class="fa-solid fa-id-card"></i>
+                <div class="stat-label">Login Branch</div>
+                <div class="stat-value" style="font-size:26px;">{{ branch or "NA" }}</div>
+            </div>
+        </div>
+
+        <div class="alert alert-info" role="alert">
+            Dashboard updated: branchwise and contractorwise detail tables have been removed.
+        </div>
+
+        <div class="action-grid">
+            <div class="action-card" onclick="window.location='/contractor'">
+                <i class="fa fa-users"></i>
+                <h4>Contractor Master</h4>
+                <p>Create, update and manage contractors.</p>
+            </div>
+            <div class="action-card" onclick="window.location='/billing'">
+                <i class="fa fa-file-invoice-dollar"></i>
+                <h4>Billing Schedule</h4>
+                <p>Manage contractor billing entries.</p>
+            </div>
+            {% if can_bulk_upload %}
+            <div class="action-card" onclick="window.location='/bulk_upload'">
+                <i class="fa fa-upload"></i>
+                <h4>Upload Bulk Entry</h4>
+                <p>Upload contractor and billing masters.</p>
+            </div>
+            {% endif %}
+            <div class="action-card">
+                <i class="fa fa-chart-column text-danger"></i>
+                <h4>Reports</h4>
+                <p>Download database records.</p>
+                <div class="export-actions">
+                    <a class="btn btn-outline-danger btn-sm" href="/export/contractors/xlsx"><i class="fa fa-file-excel"></i> Contractors Excel</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="/export/contractors/csv"><i class="fa fa-file-csv"></i> Contractors CSV</a>
+                    <a class="btn btn-outline-danger btn-sm" href="/export/billing/xlsx"><i class="fa fa-file-excel"></i> Billing Excel</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="/export/billing/csv"><i class="fa fa-file-csv"></i> Billing CSV</a>
+                </div>
+            </div>
+            {% if is_admin %}
+            <div class="action-card" onclick="window.location='/field_manager'">
+                <i class="fa fa-sliders text-warning"></i>
+                <h4>Form Fields</h4>
+                <p>Add, rename, move by layout order, hide or remove fields.</p>
+            </div>
+            <div class="action-card" onclick="window.location='/branding_settings'">
+                <i class="fa fa-image text-info"></i>
+                <h4>Branding</h4>
+                <p>Update application name, dashboard image and login photo.</p>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+    </div>
+
+    <div class="footer">&copy; 2026 Escon</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
