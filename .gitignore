@@ -1,8 +1,12 @@
 venv/
+.env
 __pycache__/
 *.pyc
 *.bak
 server-*.err
 server-*.out
+server-*.log
+*.zip
+verified_exports/
 static/uploads/*
 !static/uploads/.gitkeep

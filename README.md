@@ -21,10 +21,18 @@ Do not copy a `venv` folder between machines — a virtualenv hardcodes the path
 to the Python that created it and will not start elsewhere. Always recreate it
 with the commands above.
 
-## Database connection
+## Secure configuration
 
-Connection settings live in `database.py` (`server`, `database`, `user`,
-`password`). Update them for your environment before running.
+Copy `.env.example` to `.env` and set every value. The app reads these values
+when it starts; `.env` is ignored by Git and must never be committed.
+
+```
+Copy-Item .env.example .env
+```
+
+Set `FLASK_SECRET_KEY`, `DB_SERVER`, `DB_PORT`, `DB_DATABASE`, `DB_USER`, and
+`DB_PASSWORD` in `.env`. In IIS or Apache production deployments, set the
+same values as process environment variables instead.
 
 Verify the connection:
 

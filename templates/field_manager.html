@@ -18,6 +18,9 @@
         textarea { min-height: 42px; }
         .table td { vertical-align: middle; }
         .action-cell { min-width: 150px; }
+        .visibility-control { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; color: #0b5394; }
+        .visibility-toggle { width: 1.4rem; height: 1.4rem; margin: 0; border: 2px solid #0b5394; cursor: pointer; }
+        .visibility-toggle:checked { background-color: #0b65c9; border-color: #0b65c9; }
     </style>
 </head>
 <body>
@@ -31,9 +34,11 @@
 </nav>
 
 <div class="container-fluid px-4">
-    <div class="page-title">
+    <div class="page-title d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
         <h3><i class="fa fa-sliders"></i> Form Fields</h3>
         <p class="text-muted mb-0">Admin can add, remove and edit fields for Contractor Master and Billing Schedule.</p>
+        </div>
     </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -89,47 +94,50 @@
                     </thead>
                     <tbody>
                         {% for field_name, field in config.field_configs.items() %}
+                        {% set field_form_id = 'field-form-' ~ form_name ~ '-' ~ field_name %}
                         <tr>
-                            <form method="POST">
-                                <input type="hidden" name="action" value="edit_field">
-                                <input type="hidden" name="form_name" value="{{ form_name }}">
-                                <input type="hidden" name="field_name" value="{{ field_name }}">
                                 <td>
                                     <code>{{ field_name }}</code>
                                     {% if field.custom %}
                                     <span class="badge text-bg-info ms-1">Extra</span>
                                     {% endif %}
                                     {% if field.required %}
-                                    <span class="badge text-bg-danger ms-1">Required</span>
+                                    <span class="badge text-bg-danger ms-1" title="Required only while visible">Required</span>
                                     {% endif %}
                                 </td>
-                                <td><input type="text" name="field_label" class="form-control" value="{{ field.label }}"></td>
+                                <td><input type="text" form="{{ field_form_id }}" name="field_label" class="form-control" value="{{ field.label }}"></td>
                                 <td>
-                                    <select name="field_type" class="form-select">
+                                    <select form="{{ field_form_id }}" name="field_type" class="form-select">
                                         {% for type_value, type_label in field_type_options.items() %}
                                         <option value="{{ type_value }}" {% if field.type == type_value %}selected{% endif %}>{{ type_label }}</option>
                                         {% endfor %}
                                     </select>
                                 </td>
                                 <td>
-                                    <input type="text" name="field_options" class="form-control" value="{{ field.options }}" placeholder="Only for dropdown">
+                                    <input type="text" form="{{ field_form_id }}" name="field_options" class="form-control" value="{{ field.options }}" placeholder="Only for dropdown">
                                 </td>
                                 <td class="text-center">
-                                    <input type="checkbox" name="is_visible" value="1" class="form-check-input" {% if field.visible %}checked{% endif %} {% if field.required %}disabled title="Required fields must stay visible"{% endif %}>
+                                    <label class="visibility-control" title="Select to show this field on the form">
+                                    <input type="checkbox" form="{{ field_form_id }}" name="is_visible" value="1" class="form-check-input visibility-toggle" {% if field.visible %}checked{% endif %}>
+                                        <span>Visible</span>
+                                    </label>
                                 </td>
                                 <td class="action-cell">
+                                    <form id="{{ field_form_id }}" method="POST">
+                                        <input type="hidden" name="action" value="edit_field">
+                                        <input type="hidden" name="form_name" value="{{ form_name }}">
+                                        <input type="hidden" name="field_name" value="{{ field_name }}">
+                                    </form>
                                     <div class="d-flex gap-2">
-                                        <button type="submit" class="btn btn-success btn-sm flex-fill"><i class="fa fa-save"></i> Save</button>
+                                        <button type="submit" form="{{ field_form_id }}" class="btn btn-success btn-sm flex-fill"><i class="fa fa-save"></i> Save</button>
                                         {% if field.custom %}
-                                        <button type="submit" class="btn btn-danger btn-sm"
-                                                formaction="/field_manager"
-                                                onclick="this.form.querySelector('input[name=action]').value='delete_field'; return confirm('Delete this extra field? Existing values in this field will also be removed.');">
+                                        <button type="submit" form="{{ field_form_id }}" class="btn btn-danger btn-sm"
+                                                onclick="document.getElementById('{{ field_form_id }}').querySelector('input[name=action]').value='delete_field'; return confirm('Delete this extra field? Existing values in this field will also be removed.');">
                                             <i class="fa fa-trash"></i>
                                         </button>
                                         {% endif %}
                                     </div>
                                 </td>
-                            </form>
                         </tr>
                         {% endfor %}
                     </tbody>

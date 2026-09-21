@@ -5,14 +5,19 @@ import os
 from io import BytesIO, StringIO
 import re
 import uuid
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, session, flash, jsonify, Response, send_file, url_for
 from werkzeug.utils import secure_filename
 from database import get_connection, close_tracked_connections
 
+load_dotenv()
+
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
-app.secret_key = "escon@2026"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+if not app.secret_key:
+    raise RuntimeError("FLASK_SECRET_KEY must be set in the environment or .env file.")
 
 
 @app.teardown_appcontext
@@ -48,8 +53,20 @@ ALLOWED_SEARCH_COLUMNS = {
     "MobileNo": "MobileNo"
 }
 
-# Fields only editable by H007 user during updates
-H007_ONLY_FIELDS = [
+# Billing permissions.  These names are database column names (the SQL column
+# is BranchName, although it is displayed to users as "Branch Name").
+BRANCH_ALLOWED_FIELDS = [
+    "BranchName", "ContractorCode", "ContractorAgencyName",
+    "ContractorEmailID", "ContractorContactNo", "OwnerName",
+    "LONumberCrRemarks", "SiteProjectName", "VoucherType", "WorkOrderNo",
+    "WorkOrderDate", "TCVValue", "BillSentDate", "BillNoDebRemarks",
+    "BillDate", "BillAmount", "BillStage"
+]
+
+# User-specific billing update permissions
+SANDESH_ALLOWED_FIELDS = [
+    "BranchName",
+    "ContractorLocation",
     "BillRecdDate",
     "ProjectPayment",
     "ZohoDoc",
@@ -57,12 +74,25 @@ H007_ONLY_FIELDS = [
     "InstRemarks",
     "BillGivenHOD",
     "BillRecdFromHOD",
-    "BillSubmittedToAcctDate",
+    "BillSubmittedToAcctDate"
+]
+
+UDAY_ALLOWED_FIELDS = [
+    "AccountNumber",
+    "BankName",
+    "IFSCCode",
+    "PANNumber",
+    "TDS",
+    "EWT",
+    "GST",
+    "PayableAmount",
     "PaymentDate",
     "UTRNumber",
     "StatusInfo",
     "AcctRemarks"
 ]
+
+H007_ONLY_FIELDS = SANDESH_ALLOWED_FIELDS + UDAY_ALLOWED_FIELDS
 
 FORM_FIELDS = {
     "contractor": {
@@ -159,14 +189,7 @@ REQUIRED_FORM_FIELDS = {
         "MobileNo",
         "PANNo"
     },
-    "billing": {
-        "BranchName",
-        "ContractorCode",
-        "ContractorAgencyName",
-        "ContractorContactNo",
-        "BillDate",
-        "BillAmount"
-    }
+    "billing": set()
 }
 
 FORM_TABLES = {
@@ -223,14 +246,32 @@ def is_admin_user():
     return (session.get("role") or "").strip().lower() == "admin"
 
 
+def is_sandesh_or_uday_user():
+    return normalize_login_value(session.get("username")) in {"sandesh", "uday"}
+
+
+def is_billing_admin_user():
+    """Full billing rights require admin role and cannot override named owners."""
+    return is_admin_user() and not is_sandesh_or_uday_user()
+
+
+def get_allowed_billing_update_fields(username=None):
+    current_user = (username or session.get("username") or "").strip()
+    normalized_user = normalize_login_value(current_user)
+    if normalized_user == "sandesh":
+        return set(SANDESH_ALLOWED_FIELDS)
+    if normalized_user == "uday":
+        return set(UDAY_ALLOWED_FIELDS)
+    # Full access belongs to the admin role only. Sandesh/Uday restrictions
+    # above deliberately win even if their UserLogin role was set to admin.
+    if is_billing_admin_user():
+        return set(FORM_FIELDS["billing"]["fields"].keys())
+    # Every other branch login may maintain the operational billing fields.
+    return set(BRANCH_ALLOWED_FIELDS)
+
+
 def can_edit_billing_tracking_fields():
-    allowed_values = {"h007", "headoffice"}
-    return (
-        is_admin_user()
-        or normalize_login_value(session.get("username")) in allowed_values
-        or normalize_login_value(session.get("role")) in allowed_values
-        or normalize_login_value(session.get("branch")) in allowed_values
-    )
+    return bool(get_allowed_billing_update_fields())
 
 
 def can_bulk_upload_masters():
@@ -243,6 +284,52 @@ def can_bulk_upload_masters():
     )
 
 
+def can_bulk_update_billing():
+    """Only the billing owners and admin-role users may upload billing changes."""
+    return is_billing_admin_user() or is_sandesh_or_uday_user()
+
+
+def get_billing_bulk_allowed_fields():
+    """Return fields that the current user may supply in a billing upload."""
+    normalized_user = normalize_login_value(session.get("username"))
+    if normalized_user == "sandesh":
+        return set(SANDESH_ALLOWED_FIELDS)
+    if normalized_user == "uday":
+        return set(UDAY_ALLOWED_FIELDS)
+    if is_billing_admin_user():
+        return None  # Admin may use every ordinary, writable table column.
+    return set()
+
+
+def get_billing_bulk_columns(table_columns=None):
+    """Columns exposed in the billing bulk template for the current login.
+
+    The two key columns are always present because they identify a row; they
+    are not permission to modify those columns on an existing billing entry.
+    """
+    key_columns = ["ContractorCode", "BillNoDebRemarks"]
+    allowed_fields = get_billing_bulk_allowed_fields()
+    available_columns = set(table_columns) if table_columns is not None else None
+    if allowed_fields is None:
+        result = key_columns + [
+            field for field in FORM_FIELDS["billing"]["fields"]
+            if field not in key_columns
+        ]
+    else:
+        result = key_columns + [
+            field for field in FORM_FIELDS["billing"]["fields"]
+            if field in allowed_fields and field not in key_columns
+        ]
+    return [field for field in result if available_columns is None or field in available_columns]
+
+
+def require_billing_bulk_upload_redirect(target="/billing"):
+    if not can_bulk_update_billing():
+        flash("Bulk upload is available only to Sandesh, Uday, and users with the admin role.", "danger")
+        return redirect(target)
+    return None
+
+
 def can_edit_contractor_branch():
     return can_bulk_upload_masters()
 
@@ -252,22 +339,31 @@ def can_admin_manage_records():
 
 
 def can_save_billing():
-    """Any logged-in user may add or edit billing for their branch."""
-    return "username" in session
+    """Branch users create operational bills; Sandesh/Uday update their stages only."""
+    if "username" not in session:
+        return False
+    return normalize_login_value(session.get("username")) not in {"sandesh", "uday"}
 
 
 def can_delete_billing():
     """Deleting billing records stays with admin / head office only."""
-    return is_admin_user() or is_head_office_user()
+    return not is_sandesh_or_uday_user() and (is_billing_admin_user() or is_head_office_user())
 
 
 def can_select_billing_branch():
-    """Head office picks the branch a bill belongs to; branches are fixed."""
-    return is_admin_user() or is_head_office_user()
+    """Admin, head office, and Sandesh may select a billing branch."""
+    return (
+        is_billing_admin_user()
+        or is_head_office_user()
+        or normalize_login_value(session.get("username")) == "sandesh"
+    )
 
 
 def require_billing_edit_json():
-    if not can_save_billing():
+    # Updating an existing bill is intentionally broader than creating one:
+    # Sandesh and Uday may update their assigned columns but may not create a
+    # new billing record.
+    if "username" not in session or not can_edit_billing_tracking_fields():
         return jsonify({"status": "error", "message": "Please log in again."}), 401
     return None
 
@@ -279,6 +375,7 @@ def require_billing_delete_json():
 
 
 def require_admin_json():
+    # Download permission must not grant record-maintenance permission.
     if not is_admin_user():
         return jsonify({"status": "error", "message": "Only admin login can modify records."}), 403
     return None
@@ -984,6 +1081,15 @@ def make_billing_unique_key(contractor_code, bill_no_deb_remarks):
     return f"{contractor_code}_{bill_no_deb_remarks}"
 
 
+def format_billing_date(value):
+    """Return a date safely whether the database driver gives text or a date."""
+    if value is None:
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value)
+
+
 def get_billing_dict(row):
     def format_value(value):
         if value is None:
@@ -1062,13 +1168,16 @@ def fetch_export_rows(category, branch_filter=None):
     params = []
     conditions = []
 
-    if not is_admin_user():
+    # This is the authorization boundary for downloads. Sandesh and Uday,
+    # like admin/head office, may download both masters across every branch.
+    # Every other login remains branch-scoped.
+    if not can_export_all_branches():
         conditions.append(f"LTRIM(RTRIM({config['branch_column']})) = ?")
         params.append((session.get("branch") or "").strip())
 
-    # Admin may narrow the report to one branch, always on BranchName.
+    # Users with all-branch export access may narrow the report to one branch.
     branch_filter = (branch_filter or "").strip()
-    if branch_filter and is_admin_user():
+    if branch_filter and can_export_all_branches():
         conditions.append(f"LTRIM(RTRIM({config['branch_column']})) = ?")
         params.append(branch_filter)
 
@@ -1127,6 +1236,24 @@ def is_head_office_user():
         normalize_login_value(session.get("username")) in allowed_values
         or normalize_login_value(session.get("role")) in allowed_values
         or normalize_login_value(session.get("branch")) in allowed_values
+    )
+
+
+def can_export_all_branches():
+    """Users authorised to download both masters across every branch."""
+    export_users = {"sandesh", "uday"}
+    login_designations = {
+        normalize_login_value(session.get("username")),
+        normalize_login_value(session.get("role")),
+        normalize_login_value(session.get("branch")),
+    }
+    return (
+        is_admin_user()
+        or is_head_office_user()
+        # UserLogin may identify the person through User_Name, Role, or
+        # Branch_Name. Any explicit Sandesh/Uday designation gets download-
+        # only all-branch access.
+        or bool(login_designations & export_users)
     )
 
 
@@ -1524,12 +1651,145 @@ def insert_bulk_records(form_name, records):
         conn.close()
 
 
+def build_billing_bulk_records(raw_rows, columns, metadata):
+    """Read a role-specific billing file and reject columns outside its scope."""
+    records = build_bulk_records("billing", raw_rows, columns, metadata)
+    permitted_columns = set(get_billing_bulk_columns(columns))
+    for row_number, record in records:
+        forbidden = set(record) - permitted_columns
+        if forbidden:
+            raise ValueError(
+                f"Row {row_number}: this login cannot upload "
+                + ", ".join(sorted(forbidden)) + "."
+            )
+        for key_column in ("ContractorCode", "BillNoDebRemarks"):
+            if not str(record.get(key_column) or "").strip():
+                raise ValueError(f"Row {row_number}: {key_column} is required.")
+    return records
+
+
+def prepare_billing_bulk_new_record(cursor, record):
+    """Populate system-owned fields and contractor details for a new bill."""
+    contractor_code = str(record.get("ContractorCode") or "").strip()
+    contractor = fetch_contractor_by_code(cursor, contractor_code)
+    if not contractor:
+        return None, f"Contractor Code '{contractor_code}' was not found in Contractor Master."
+
+    record = dict(record)
+    record["ContractorCode"] = contractor_code
+    record["BillNoDebRemarks"] = str(record.get("BillNoDebRemarks") or "").strip()
+    apply_contractor_master_fields(record, contractor)
+    if not str(record.get("BranchName") or "").strip():
+        record["BranchName"] = (session.get("branch") or "").strip()
+    record["Uniquekey"] = make_billing_unique_key(
+        record["ContractorCode"], record["BillNoDebRemarks"]
+    )
+    record["CreatedBy"] = session.get("username", "")
+    record["CreatedDate"] = datetime.now()
+    record["ModifiedBy"] = session.get("username", "")
+    record["ModifiedDate"] = datetime.now()
+    prepare_bulk_record("billing", record)
+    return record, None
+
+
+def process_billing_bulk_upload(records):
+    """Upsert billing rows by ContractorCode + BillNoDebRemarks only."""
+    allowed_fields = get_billing_bulk_allowed_fields()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    summary = {"saved": 0, "updated": 0, "skipped": []}
+    try:
+        table_columns, _ = get_bulk_upload_columns(cursor, "billing")
+        table_column_set = set(table_columns)
+        uploaded_keys = set()
+
+        for row_number, uploaded_record in records:
+            contractor_code = str(uploaded_record.get("ContractorCode") or "").strip()
+            bill_no = str(uploaded_record.get("BillNoDebRemarks") or "").strip()
+            key = (contractor_code.casefold(), bill_no.casefold())
+            if key in uploaded_keys:
+                summary["skipped"].append(f"Row {row_number}: duplicate ContractorCode + BillNo in this file.")
+                continue
+            uploaded_keys.add(key)
+
+            cursor.execute(
+                """
+                SELECT BillingID FROM AdBillingMaster
+                WHERE LTRIM(RTRIM(ContractorCode)) = ?
+                  AND LTRIM(RTRIM(BillNoDebRemarks)) = ?
+                """,
+                (contractor_code, bill_no)
+            )
+            existing = cursor.fetchone()
+
+            if not existing:
+                record, error = prepare_billing_bulk_new_record(cursor, uploaded_record)
+                if error:
+                    summary["skipped"].append(f"Row {row_number}: {error}")
+                    continue
+                validation_error = validate_billing_data(record)
+                if validation_error:
+                    summary["skipped"].append(f"Row {row_number}: {validation_error}")
+                    continue
+
+                insert_columns = [column for column in table_columns if column in record]
+                cursor.execute(
+                    "INSERT INTO AdBillingMaster ({columns}) VALUES ({placeholders})".format(
+                        columns=", ".join(bracket_identifier(column) for column in insert_columns),
+                        placeholders=", ".join(["?"] * len(insert_columns))
+                    ),
+                    [record[column] for column in insert_columns]
+                )
+                summary["saved"] += 1
+                continue
+
+            # Blank update cells deliberately leave the stored value unchanged.
+            # This keeps a downloaded role-specific template safe to reuse.
+            update_columns = [
+                column for column in uploaded_record
+                if column in table_column_set
+                and column not in {"ContractorCode", "BillNoDebRemarks"}
+                and (allowed_fields is None or column in allowed_fields)
+                and uploaded_record[column] is not None
+            ]
+            if not update_columns:
+                summary["skipped"].append(f"Row {row_number}: no permitted values to update.")
+                continue
+
+            update_columns.extend(["ModifiedBy", "ModifiedDate"])
+            update_values = [uploaded_record[column] for column in update_columns[:-2]]
+            update_values.extend([session.get("username", ""), datetime.now(), existing.BillingID])
+            cursor.execute(
+                "UPDATE AdBillingMaster SET {assignments} WHERE BillingID = ?".format(
+                    assignments=", ".join(f"{bracket_identifier(column)} = ?" for column in update_columns)
+                ),
+                update_values
+            )
+            summary["updated"] += 1
+
+        conn.commit()
+        return summary
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
 # -----------------------------
 # Login Page
 # -----------------------------
 @app.route("/")
 def home():
     return render_template("login.html")
+
+
+@app.route("/health")
+def health_check():
+    """Lightweight Render health endpoint that does not require a DB query."""
+    return jsonify({"status": "ok"})
 
 
 # -----------------------------
@@ -1601,14 +1861,18 @@ def bulk_upload():
     if access_response:
         return access_response
 
+    # Billing Schedule has its own role-specific uploader on /billing.  Keep
+    # this legacy screen limited to Contractor Master so head-office access
+    # here cannot bypass the billing upload permissions.
+    uploadable_configs = {"contractor": BULK_UPLOAD_CONFIG["contractor"]}
     active_tab = request.form.get("form_name") or request.args.get("form_name") or "contractor"
-    if active_tab not in BULK_UPLOAD_CONFIG:
+    if active_tab not in uploadable_configs:
         active_tab = "contractor"
 
     if request.method == "POST":
         form_name = request.form.get("form_name", "").strip()
         upload_file = request.files.get("upload_file")
-        if form_name not in BULK_UPLOAD_CONFIG:
+        if form_name not in uploadable_configs:
             flash("Invalid upload tab selected.", "danger")
             return redirect("/bulk_upload")
         if not upload_file or not upload_file.filename:
@@ -1637,14 +1901,14 @@ def bulk_upload():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        for form_name, config in BULK_UPLOAD_CONFIG.items():
+        for form_name, config in uploadable_configs.items():
             columns, _ = get_bulk_upload_columns(cursor, form_name)
             upload_configs[form_name] = {**config, "columns": columns}
         cursor.close()
         conn.close()
     except Exception as exc:
         flash(str(exc), "danger")
-        upload_configs = BULK_UPLOAD_CONFIG
+        upload_configs = uploadable_configs
 
     return render_template(
         "bulk_upload.html",
@@ -1659,10 +1923,14 @@ def bulk_upload():
 def bulk_upload_template(form_name):
     if "username" not in session:
         return redirect("/")
+    # Preserve old bookmarks and downloaded-template links while ensuring
+    # Billing Schedule always uses the populated, role-specific template.
+    if form_name == "billing":
+        return redirect(url_for("billing_bulk_upload_template"))
     access_response = require_bulk_upload_redirect("/dashboard")
     if access_response:
         return access_response
-    if form_name not in BULK_UPLOAD_CONFIG:
+    if form_name != "contractor":
         return jsonify({"status": "error", "message": "Invalid template request."}), 400
 
     try:
@@ -1703,11 +1971,11 @@ def export_data(category, file_format):
         branch_filter = request.args.get("branch_name", "").strip()
         columns, rows = fetch_export_rows(category, branch_filter)
         filename = EXPORT_CONFIG[category]["filename"]
-        if branch_filter and is_admin_user():
+        if branch_filter and can_export_all_branches():
             tag = re.sub(r"[^A-Za-z0-9]+", "_", branch_filter).strip("_")
             if tag:
                 filename = f"{filename}_{tag}"
-        if not is_admin_user():
+        if not can_export_all_branches():
             branch_part = re.sub(r"[^A-Za-z0-9]+", "_", session.get("branch", "").strip()).strip("_")
             if branch_part:
                 filename = f"{filename}_{branch_part}"
@@ -1733,6 +2001,7 @@ def reports():
         username=session["username"],
         branch=session["branch"],
         is_admin=is_admin_user(),
+        can_export_all_branches=can_export_all_branches(),
         branch_options=get_branch_options()
     )
 
@@ -1962,6 +2231,7 @@ def billing():
     if "username" not in session:
         return redirect("/")
 
+    allowed_billing_fields = get_allowed_billing_update_fields()
     return render_template(
         "billing.html",
         username=session["username"],
@@ -1969,13 +2239,121 @@ def billing():
         branch_options=get_branch_options(),
         is_h007=is_h007_user(),
         can_edit_billing_tracking=can_edit_billing_tracking_fields(),
+        allowed_billing_fields=allowed_billing_fields,
         is_admin=is_admin_user(),
         can_save_billing=can_save_billing(),
         can_delete_billing=can_delete_billing(),
         can_select_branch=can_select_billing_branch(),
+        can_bulk_update_billing=can_bulk_update_billing(),
         hidden_fields=get_hidden_form_fields("billing"),
         custom_fields=get_custom_form_fields("billing", visible_only=True),
         field_settings=get_form_field_settings("billing")
+    )
+
+
+@app.route("/billing/bulk-upload", methods=["GET", "POST"])
+def billing_bulk_upload():
+    if "username" not in session:
+        return redirect("/")
+    access_response = require_billing_bulk_upload_redirect()
+    if access_response:
+        return access_response
+
+    if request.method == "POST":
+        upload_file = request.files.get("upload_file")
+        if not upload_file or not upload_file.filename:
+            flash("Please choose a CSV or XLSX file to upload.", "danger")
+        else:
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                all_columns, metadata = get_bulk_upload_columns(cursor, "billing")
+                cursor.close()
+                conn.close()
+
+                records = build_billing_bulk_records(
+                    read_bulk_upload_rows(upload_file), all_columns, metadata
+                )
+                summary = process_billing_bulk_upload(records)
+                message = (
+                    f"{summary['saved']} new billing record(s) saved and "
+                    f"{summary['updated']} existing billing record(s) updated."
+                )
+                if summary["skipped"]:
+                    message += " Skipped: " + " | ".join(summary["skipped"])
+                    flash(message, "warning")
+                else:
+                    flash(message, "success")
+            except Exception as exc:
+                flash(str(exc), "danger")
+        return redirect("/billing/bulk-upload")
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        table_columns, _ = get_bulk_upload_columns(cursor, "billing")
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        flash(str(exc), "danger")
+        return redirect("/billing")
+
+    return render_template(
+        "billing_bulk_upload.html",
+        username=session["username"],
+        branch=session.get("branch", ""),
+        columns=get_billing_bulk_columns(table_columns),
+        is_admin=is_admin_user()
+    )
+
+
+@app.route("/billing/bulk-upload/template")
+def billing_bulk_upload_template():
+    if "username" not in session:
+        return redirect("/")
+    access_response = require_billing_bulk_upload_redirect()
+    if access_response:
+        return access_response
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        table_columns, _ = get_bulk_upload_columns(cursor, "billing")
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Billing Schedule"
+    columns = get_billing_bulk_columns(table_columns)
+    sheet.append(columns)
+    cursor = conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM AdBillingMaster ORDER BY BillingID")
+        for row in cursor.fetchall():
+            sheet.append([clean_export_value(getattr(row, column, None)) for column in columns])
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+    sheet.freeze_panes = "A2"
+    for cell in sheet[1]:
+        cell.font = cell.font.copy(bold=True)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="billing_schedule_upload_template.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
 
@@ -1983,7 +2361,8 @@ def billing():
 # Billing CRUD Endpoints
 @app.route("/save_billing", methods=["POST"])
 def save_billing():
-    if "username" not in session:
+    if not can_save_billing():
+        flash("This login can update its assigned billing fields but cannot create a new billing entry.", "danger")
         return redirect("/")
 
     billing_data = {
@@ -2032,6 +2411,18 @@ def save_billing():
     }
     custom_billing_data = collect_custom_values(request.form, "billing")
 
+    # Never trust disabled/read-only browser controls: discard values that this
+    # login is not permitted to create.  Admin/head office retain every field.
+    allowed_fields = get_allowed_billing_update_fields()
+    for field_name in FORM_FIELDS["billing"]["fields"]:
+        if field_name not in allowed_fields:
+            billing_data[field_name] = None
+
+    # A branch login must always create the bill in its own branch, regardless
+    # of a value altered in the browser request.
+    if not can_select_billing_branch():
+        billing_data["BranchName"] = (session.get("branch") or "").strip()
+
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -2044,9 +2435,6 @@ def save_billing():
             return redirect("/billing")
 
         apply_contractor_master_fields(billing_data, contractor)
-
-        if not can_edit_billing_tracking_fields():
-            clear_h007_only_fields(billing_data)
 
         calculate_billing_amounts(billing_data, contractor)
         billing_data["Uniquekey"] = make_billing_unique_key(
@@ -2127,7 +2515,7 @@ def search_billing():
     query = (
         "SELECT BillingID, Uniquekey, ContractorCode, ContractorAgencyName, "
         "BillNoDebRemarks, BillDate, BillAmount FROM AdBillingMaster "
-        "WHERE Uniquekey LIKE ?"
+        "WHERE LTRIM(RTRIM(Uniquekey)) LIKE ?"
     )
     params = [f"%{search_term}%"]
 
@@ -2148,14 +2536,15 @@ def search_billing():
                 "ContractorCode": row.ContractorCode,
                 "ContractorAgencyName": row.ContractorAgencyName,
                 "BillNoDebRemarks": row.BillNoDebRemarks,
-                "BillDate": row.BillDate.strftime('%Y-%m-%d') if row.BillDate else None,
+                "BillDate": format_billing_date(row.BillDate),
                 "BillAmount": float(row.BillAmount) if row.BillAmount is not None else None
             }
             for row in rows
         ]
         return jsonify(results)
-    except Exception:
-        return jsonify([]), 500
+    except Exception as exc:
+        app.logger.exception("Billing search failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
 
 @app.route("/get_billing/<int:billing_id>")
@@ -2187,6 +2576,18 @@ def update_billing():
         return edit_response
 
     payload = request.get_json(silent=True) or {}
+    allowed_fields = get_allowed_billing_update_fields()
+    if not allowed_fields:
+        return jsonify({"status": "error", "message": "Not authorized to update billing fields."}), 403
+
+    allowed_key_fields = {"BillingID", "ContractorCode", "BillNoDebRemarks", "OriginalUniquekey", "Uniquekey", "OriginalContractorCode", "OriginalBillNoDebRemarks"}
+    filtered_payload = {
+        key: value
+        for key, value in payload.items()
+        if key in allowed_key_fields or key in allowed_fields
+    }
+    payload = filtered_payload
+
     billing_id = payload.get("BillingID")
     original_unique_key = (payload.get("OriginalUniquekey") or payload.get("Uniquekey") or "").strip()
     original_contractor_code = (payload.get("OriginalContractorCode") or payload.get("ContractorCode") or "").strip()
@@ -2260,23 +2661,11 @@ def update_billing():
 
         stored_code = (existing.ContractorCode or "").strip()
         stored_bill_no = (existing.BillNoDebRemarks or "").strip()
-        sent_code = (billing_data.get("ContractorCode") or "").strip()
-        sent_bill_no = (billing_data.get("BillNoDebRemarks") or "").strip()
-        if sent_code.upper() != stored_code.upper() or sent_bill_no.upper() != stored_bill_no.upper():
-            cursor.close()
-            conn.close()
-            return jsonify({
-                "status": "error",
-                "message": (
-                    "Contractor Code and Bill No / Deb Remarks cannot be changed on update, "
-                    "because they form the unique key. Use Save to create a new entry."
-                )
-            }), 400
 
-        custom_billing_data = collect_custom_values(payload, "billing")
-        for field_name in get_custom_form_fields("billing").keys():
-            if field_name not in payload:
-                custom_billing_data[field_name] = getattr(existing, field_name, None)
+        # Custom fields have no Sandesh/Uday assignment, so only admin may
+        # change them. This prevents an injected JSON property bypassing the
+        # standard-field permission map.
+        custom_billing_data = collect_custom_values(payload, "billing") if is_billing_admin_user() else {}
 
         contractor = fetch_contractor_by_code(cursor, billing_data.get("ContractorCode"))
         if not contractor:
@@ -2284,17 +2673,39 @@ def update_billing():
             conn.close()
             return jsonify({"status": "error", "message": "Contractor Code was not found in Contractor Master."}), 400
 
-        apply_contractor_master_fields(billing_data, contractor)
+        # The contractor lookup above validates the code.  Do not overwrite
+        # fields from the submitted record here: an update must preserve the
+        # authorised values entered by the user (including Uday's bank values)
+        # rather than silently replacing them from Contractor Master.
+
+        allowed_fields = get_allowed_billing_update_fields()
+        if not allowed_fields:
+            cursor.close()
+            conn.close()
+            return jsonify({"status": "error", "message": "Not authorized to update billing fields."}), 403
+
+        protected_fields = set(FORM_FIELDS["billing"]["fields"].keys()) - allowed_fields
+        protected_fields.discard("ContractorCode")
+        protected_fields.discard("BillNoDebRemarks")
+        protected_fields.discard("Uniquekey")
+        for field_name in protected_fields:
+            if hasattr(existing, field_name):
+                billing_data[field_name] = getattr(existing, field_name)
 
         if not can_edit_billing_tracking_fields():
             preserve_h007_only_fields(billing_data, existing)
 
-        calculate_billing_amounts(billing_data, contractor)
-        # The key is fixed for the life of the row.
-        billing_data["ContractorCode"] = stored_code
-        billing_data["BillNoDebRemarks"] = stored_bill_no
-        billing_data["Uniquekey"] = (row_unique_key(existing) or "").strip() or make_billing_unique_key(
-            stored_code, stored_bill_no
+        if "BillAmount" in allowed_fields:
+            calculate_billing_amounts(billing_data, contractor)
+        # Users with permission to edit the operational fields may also change
+        # either component of the unique key.  The duplicate check below keeps
+        # the database constraint intact.  Other logins keep the stored key.
+        if "ContractorCode" not in allowed_fields:
+            billing_data["ContractorCode"] = stored_code
+        if "BillNoDebRemarks" not in allowed_fields:
+            billing_data["BillNoDebRemarks"] = stored_bill_no
+        billing_data["Uniquekey"] = make_billing_unique_key(
+            billing_data["ContractorCode"], billing_data["BillNoDebRemarks"]
         )
 
         error = validate_billing_data(billing_data)
@@ -2317,8 +2728,10 @@ def update_billing():
             conn.close()
             return jsonify({"status": "error", "message": "A billing entry with this unique key already exists."}), 409
 
-        update_columns = [
-            "Uniquekey",
+        update_columns = ["Uniquekey", "ModifiedBy", "ModifiedDate"]
+        update_values = [billing_data["Uniquekey"], session["username"], datetime.now()]
+
+        all_billing_columns = [
             "BranchName", "ContractorLocation", "ContractorCode", "ContractorAgencyName", "ContractorEmailID",
             "ContractorContactNo", "OwnerName", "LONumberCrRemarks", "SiteProjectName",
             "VoucherType", "WorkOrderNo", "WorkOrderDate", "TCVValue", "BillSentDate",
@@ -2326,12 +2739,20 @@ def update_billing():
             "ProjectPayment", "ZohoDoc", "TallyName", "InstRemarks", "BillGivenHOD",
             "BillRecdFromHOD", "BillSubmittedToAcctDate", "AccountNumber", "BankName",
             "IFSCCode", "PANNumber", "TDS", "EWT", "GST", "PayableAmount", "PaymentDate",
-            "UTRNumber", "StatusInfo", "AcctRemarks", "ModifiedBy", "ModifiedDate"
+            "UTRNumber", "StatusInfo", "AcctRemarks"
         ]
-        update_values = [billing_data[column] for column in update_columns]
+        for column in all_billing_columns:
+            # Missing JSON properties mean "leave the SQL value unchanged".
+            # This is the key guard against a restricted user's update turning
+            # unrelated columns into NULL/blank values.
+            if column in allowed_fields and column in payload and column in billing_data:
+                update_columns.append(column)
+                update_values.append(billing_data[column])
+
         for column, value in custom_billing_data.items():
-            update_columns.append(column)
-            update_values.append(value)
+            if is_billing_admin_user() and column in payload:
+                update_columns.append(column)
+                update_values.append(value)
         update_values.append(billing_id)
 
         cursor.execute(
@@ -2595,25 +3016,6 @@ def get_contractor(code=None):
     except Exception as exc:
         app.logger.exception("Failed to fetch contractor %s", code)
         return jsonify({"message": str(exc)}), 500
-
-
-@app.route("/debug_contractors")
-def debug_contractors():
-    if "username" not in session:
-        return redirect("/")
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT TOP 20 ContractorID, ContractorCode, LedgerName, PANNo, MainBranch FROM AdContractorMaster ORDER BY ContractorID DESC")
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    content = "<h2>Debug Contractors</h2><table border='1' cellpadding='6'><tr><th>ID</th><th>Code</th><th>Ledger</th><th>PAN</th><th>Branch</th></tr>"
-    for row in rows:
-        content += f"<tr><td>{row.ContractorID}</td><td>{row.ContractorCode}</td><td>{row.LedgerName}</td><td>{row.PANNo}</td><td>{row.MainBranch}</td></tr>"
-    content += "</table>"
-    return content
 
 
 @app.route("/update_contractor", methods=["POST"])

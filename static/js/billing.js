@@ -7,6 +7,9 @@ const originalBillNoField = document.getElementById('original_bill_no');
 const billingSearchModal = new bootstrap.Modal(document.getElementById('billingSearchModal'));
 const billingSearchResults = document.getElementById('billingSearchResults');
 const billingPermissions = window.billingPermissions || { canEditBillingTracking: false };
+const allowedBillingFields = new Set(billingPermissions.allowedFields || []);
+const canChangeBillingKey = allowedBillingFields.has('ContractorCode')
+    && allowedBillingFields.has('BillNoDebRemarks');
 let currentContractor = null;
 
 function showAlert(message, type = 'success') {
@@ -36,9 +39,10 @@ function setKeyFieldsLocked(locked) {
     ['contractor_code', 'bill_no'].forEach(function (id) {
         const el = document.getElementById(id);
         if (el) {
-            el.readOnly = locked;
-            el.classList.toggle('bg-body-secondary', locked);
-            el.title = locked
+            const shouldLock = locked && !canChangeBillingKey;
+            el.readOnly = shouldLock;
+            el.classList.toggle('bg-body-secondary', shouldLock);
+            el.title = shouldLock
                 ? 'Contractor Code and Bill No cannot be changed on an existing entry. Use New to add a different bill.'
                 : '';
         }
@@ -78,34 +82,6 @@ function calculateTaxes() {
 }
 
 function validateBillingForm() {
-    const contractorCode = getValue('contractor_code');
-    const agencyName = getValue('agency_name');
-    const contactNo = getValue('contractor_contact');
-    const billNo = getValue('bill_no');
-    const billDate = getValue('bill_date');
-    const billAmount = getValue('bill_amount');
-
-    if (!contractorCode) {
-        return 'Contractor Code is required.';
-    }
-    if (!agencyName) {
-        return 'Contractor Agency Name is required.';
-    }
-    if (!contactNo) {
-        return 'Contractor Contact No is required.';
-    }
-    if (!/^[0-9]+$/.test(contactNo)) {
-        return 'Contractor Contact No must contain only digits.';
-    }
-    if (!billNo) {
-        return 'Bill No / Deb Remarks is required.';
-    }
-    if (!billDate) {
-        return 'Bill Date is required.';
-    }
-    if (!billAmount || Number.isNaN(Number(billAmount))) {
-        return 'Bill Amount must be a valid number.';
-    }
     return null;
 }
 
@@ -289,14 +265,16 @@ async function loadBillingEntry(billingId) {
         const data = await response.json();
         populateBillingForm(data);
         billingSearchModal.hide();
-        await loadContractorByCode();
+        // Keep the billing row exactly as stored. We only need the contractor
+        // object for optional calculations, not to overwrite loaded values.
+        await loadContractorByCode(false);
         showAlert('Billing entry loaded successfully.', 'success');
     } catch (error) {
         showAlert(error.message, 'danger');
     }
 }
 
-async function loadContractorByCode() {
+async function loadContractorByCode(populateForm = true) {
     const code = getValue('contractor_code').toUpperCase();
     if (!code) {
         showAlert('Please enter a contractor code.', 'warning');
@@ -311,18 +289,26 @@ async function loadContractorByCode() {
         }
         const c = await resp.json();
         currentContractor = c;
-        setValue('contractor_location', c.MainBranch || '');
-        setValue('contractor_code', c.ContractorCode || getValue('contractor_code'));
-        setValue('agency_name', c.LedgerName || getValue('agency_name'));
-        setValue('contractor_email', c.EmailID || getValue('contractor_email'));
-        setValue('contractor_contact', c.MobileNo || getValue('contractor_contact'));
-        setValue('owner_name', c.OwnerName || getValue('owner_name'));
-        setValue('account_number', c.AccountNumber || getValue('account_number'));
-        setValue('bank_name', c.BankName || getValue('bank_name'));
-        setValue('ifsc_code', c.IFSCCode || getValue('ifsc_code'));
-        setValue('pan_number', c.PANNo || getValue('pan_number'));
-        calculateTaxes();
-        showAlert('Contractor fields autofilled from master.', 'info');
+        if (populateForm) {
+            setValue('contractor_location', c.MainBranch || '');
+            setValue('contractor_code', c.ContractorCode || getValue('contractor_code'));
+            setValue('agency_name', c.LedgerName || getValue('agency_name'));
+            setValue('contractor_email', c.EmailID || getValue('contractor_email'));
+            setValue('contractor_contact', c.MobileNo || getValue('contractor_contact'));
+            setValue('owner_name', c.OwnerName || getValue('owner_name'));
+            setValue('account_number', c.AccountNumber || getValue('account_number'));
+            setValue('bank_name', c.BankName || getValue('bank_name'));
+            setValue('ifsc_code', c.IFSCCode || getValue('ifsc_code'));
+            setValue('pan_number', c.PANNo || getValue('pan_number'));
+        }
+        // Tax values are recalculated only for users allowed to change the
+        // bill amount. Uday's manually maintained payment values stay intact.
+        if (populateForm && allowedBillingFields.has('BillAmount')) {
+            calculateTaxes();
+        }
+        if (populateForm) {
+            showAlert('Contractor fields autofilled from master.', 'info');
+        }
     } catch (error) {
         showAlert('Failed to fetch contractor details: ' + error.message, 'danger');
     }
@@ -348,16 +334,39 @@ document.getElementById('btnFetchContractor').addEventListener('click', function
 
 document.getElementById('bill_amount').addEventListener('input', calculateTaxes);
 
+// The server enforces this permission list as well.  This client-side layer
+// simply makes the permitted fields clear in the form and avoids accidental
+// edits before the request reaches the server.
+const billingInputFields = {
+    BranchName: 'branch_name', ContractorLocation: 'contractor_location',
+    ContractorCode: 'contractor_code', ContractorAgencyName: 'agency_name',
+    ContractorEmailID: 'contractor_email', ContractorContactNo: 'contractor_contact',
+    OwnerName: 'owner_name', LONumberCrRemarks: 'lo_number', SiteProjectName: 'site_project',
+    VoucherType: 'voucher_type', WorkOrderNo: 'work_order_no', WorkOrderDate: 'work_order_date',
+    TCVValue: 'tcv_value', BillSentDate: 'bill_sent_date', BillNoDebRemarks: 'bill_no',
+    BillDate: 'bill_date', BillAmount: 'bill_amount', BillStage: 'bill_stage',
+    BillRecdDate: 'bill_recd_date', ProjectPayment: 'project_payment', ZohoDoc: 'zoho_doc',
+    TallyName: 'tally_name', InstRemarks: 'inst_remarks', BillGivenHOD: 'bill_given_hod',
+    BillRecdFromHOD: 'bill_recd_hod', BillSubmittedToAcctDate: 'bill_submitted_acct_date',
+    AccountNumber: 'account_number', BankName: 'bank_name', IFSCCode: 'ifsc_code',
+    PANNumber: 'pan_number', TDS: 'tds', EWT: 'ewt', GST: 'gst', PayableAmount: 'payable_amount',
+    PaymentDate: 'payment_date', UTRNumber: 'utr_number', StatusInfo: 'status_info', AcctRemarks: 'acct_remarks'
+};
+
+Object.entries(billingInputFields).forEach(([fieldName, elementId]) => {
+    const element = document.getElementById(elementId);
+    if (!element || allowedBillingFields.has(fieldName)) return;
+    if (element.tagName === 'SELECT') {
+        element.disabled = true;
+    } else {
+        element.readOnly = true;
+    }
+});
+
 async function updateBilling() {
     const billingId = billingIdField.value;
     if (!billingId) {
         showAlert('Please select an existing billing entry before updating.', 'warning');
-        return;
-    }
-
-    const error = validateBillingForm();
-    if (error) {
-        showAlert(error, 'danger');
         return;
     }
 

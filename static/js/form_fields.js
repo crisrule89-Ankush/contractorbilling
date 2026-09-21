@@ -1,6 +1,25 @@
 (function () {
     const hiddenFields = window.hiddenFormFields || [];
     const settings = window.formFieldSettings || {};
+    const configs = window.formFieldConfigs || {};
+    // These fields are populated by application data, not manually-maintained
+    // dropdown options.  Replacing MainBranch would turn all branches into a
+    // single option if someone saves an invalid Field Manager value.
+    const protectedControls = new Set(['MainBranch']);
+
+    // Labels are stored in FormFieldConfig too. Updating a label in Field
+    // Manager therefore changes the actual page label on the next render.
+    Object.entries(configs).forEach(([fieldName, config]) => {
+        if (!config || !config.label) return;
+        document.querySelectorAll(`[name="${fieldName}"]`).forEach(field => {
+            const container = field.closest('.mb-3');
+            const label = container && container.querySelector('label.form-label');
+            if (!label) return;
+            const required = label.querySelector('.required');
+            label.textContent = config.label + (required ? ' ' : '');
+            if (required) label.appendChild(required);
+        });
+    });
 
     // Hide fields switched off in Field Manager.
     hiddenFields.forEach(fieldName => {
@@ -57,6 +76,7 @@
 
     // Apply the field type chosen in Field Manager to the built-in fields.
     Object.keys(settings).forEach(fieldName => {
+        if (protectedControls.has(fieldName)) return;
         const config = settings[fieldName] || {};
         const type = config.type || 'text';
         const options = config.options || [];

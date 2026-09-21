@@ -15,7 +15,6 @@
         .card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); margin-bottom: 20px; }
         .card-header { background: #0B5394; color: white; font-size: 18px; font-weight: bold; }
         .form-label { font-weight: 600; }
-        .required { color: red; }
         input, select { height: 42px; }
         .action-bar { position: sticky; top: 0; z-index: 1020; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
         .action-bar .btn { min-width: 110px; }
@@ -33,22 +32,16 @@
     </div>
 </nav>
 <div class="container-fluid px-4">
+    <div id="alertContainer" class="sticky-top"></div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}{% for category, msg in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show mt-3" role="alert">{{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>
+    {% endfor %}{% endif %}{% endwith %}
     <div class="page-title">
         <h3><i class="fa-solid fa-file-invoice-dollar"></i> Billing Schedule</h3>
         <p class="text-muted">Create and manage billing entries with the same familiar workflow as Contractor Master.</p>
     </div>
 
-    <div id="alertContainer"></div>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        {% for category, msg in messages %}
-            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                {{ msg }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-    {% endwith %}
     <form id="billingForm" action="/save_billing" method="POST">
         <input type="hidden" id="billing_id" name="BillingID">
         <input type="hidden" id="original_unique_key" name="OriginalUniquekey">
@@ -58,9 +51,12 @@
             <div class="card-body text-center py-3">
                 <button type="button" id="btnNew" class="btn btn-primary me-2 btn-custom"><i class="fa fa-plus"></i> New</button>
                 <button type="submit" id="btnSave" class="btn btn-success me-2 btn-custom" {% if not can_save_billing %}disabled title="Login required"{% endif %}><i class="fa fa-save"></i> Save</button>
-                <button type="button" id="btnUpdate" class="btn btn-warning me-2 btn-custom" {% if not can_save_billing %}disabled title="Login required"{% endif %}><i class="fa fa-edit"></i> Update</button>
+                <button type="button" id="btnUpdate" class="btn btn-warning me-2 btn-custom" {% if not can_edit_billing_tracking %}disabled title="Login required"{% endif %}><i class="fa fa-edit"></i> Update</button>
                 {% if can_delete_billing %}
                 <button type="button" id="btnDelete" class="btn btn-danger me-2 btn-custom"><i class="fa fa-trash"></i> Delete</button>
+                {% endif %}
+                {% if can_bulk_update_billing %}
+                <a href="/billing/bulk-upload" class="btn btn-primary me-2 btn-custom"><i class="fa fa-upload"></i> Bulk Upload</a>
                 {% endif %}
                 <button type="button" id="btnSearchBilling" class="btn btn-info me-2 btn-custom"><i class="fa fa-search"></i> Search</button>
                 <button type="reset" class="btn btn-secondary me-2 btn-custom"><i class="fa fa-eraser"></i> Clear</button>
@@ -72,7 +68,7 @@
             <div class="card-body">
                 <div class="row">
                     <div class="col-md-3 mb-3">
-                        <label class="form-label">Branch Name <span class="required">*</span></label>
+                        <label class="form-label">Branch Name</label>
                         {% if can_select_branch %}
                         <select id="branch_name" name="BranchName" class="form-select">
                             {% for option in branch_options %}
@@ -87,11 +83,11 @@
                     <div class="col-md-3 mb-3">
                         <label class="form-label">Contractor Location</label>
                         <input type="text" id="contractor_location" name="ContractorLocation"
-                               class="form-control" placeholder="From contractor code" readonly>
+                               class="form-control" placeholder="From contractor code" {% if 'ContractorLocation' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     {% endif %}
                     <div class="col-md-3 mb-3">
-                        <label class="form-label">Contractor Code <span class="required">*</span></label>
+                        <label class="form-label">Contractor Code</label>
                         <div class="input-group">
                             <input type="text" id="contractor_code" name="ContractorCode" class="form-control" style="text-transform:uppercase;">
                             <button type="button" id="btnFetchContractor" class="btn btn-outline-primary">
@@ -100,20 +96,20 @@
                         </div>
                     </div>
                     <div class="col-md-3 mb-3">
-                        <label class="form-label">Contractor Agency Name <span class="required">*</span></label>
-                        <input type="text" id="agency_name" name="ContractorAgencyName" class="form-control" readonly>
+                        <label class="form-label">Contractor Agency Name</label>
+                        <input type="text" id="agency_name" name="ContractorAgencyName" class="form-control" {% if 'ContractorAgencyName' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-3 mb-3">
                         <label class="form-label">Contractor Email ID</label>
-                        <input type="email" id="contractor_email" name="ContractorEmailID" class="form-control" readonly>
+                        <input type="text" id="contractor_email" name="ContractorEmailID" class="form-control" {% if 'ContractorEmailID' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-3 mb-3">
-                        <label class="form-label">Contractor Contact No <span class="required">*</span></label>
-                        <input type="text" id="contractor_contact" name="ContractorContactNo" class="form-control" readonly>
+                        <label class="form-label">Contractor Contact No</label>
+                        <input type="text" id="contractor_contact" name="ContractorContactNo" class="form-control" {% if 'ContractorContactNo' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-3 mb-3">
                         <label class="form-label">Owner Name</label>
-                        <input type="text" id="owner_name" name="OwnerName" class="form-control" readonly>
+                        <input type="text" id="owner_name" name="OwnerName" class="form-control" {% if 'OwnerName' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-3 mb-3">
                         <label class="form-label">LO Number / Cr Remarks</label>
@@ -152,15 +148,15 @@
                         <input type="date" id="bill_sent_date" name="BillSentDate" class="form-control">
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label">Bill No / Deb Remarks <span class="required">*</span></label>
+                        <label class="form-label">Bill No / Deb Remarks</label>
                         <input type="text" id="bill_no" name="BillNoDebRemarks" class="form-control">
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label">Bill Date <span class="required">*</span></label>
+                        <label class="form-label">Bill Date</label>
                         <input type="date" id="bill_date" name="BillDate" class="form-control">
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label">Bill Amount <span class="required">*</span></label>
+                        <label class="form-label">Bill Amount</label>
                         <input type="number" id="bill_amount" name="BillAmount" class="form-control" step="0.01">
                     </div>
                     <div class="col-md-4 mb-3">
@@ -175,35 +171,35 @@
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Bill Recd Date</label>
-                        <input type="date" id="bill_recd_date" name="BillRecdDate" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="date" id="bill_recd_date" name="BillRecdDate" class="form-control" {% if 'BillRecdDate' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Project Payment</label>
-                        <input type="text" id="project_payment" name="ProjectPayment" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="project_payment" name="ProjectPayment" class="form-control" {% if 'ProjectPayment' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Zoho doc</label>
-                        <input type="text" id="zoho_doc" name="ZohoDoc" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="zoho_doc" name="ZohoDoc" class="form-control" {% if 'ZohoDoc' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Tally Name</label>
-                        <input type="text" id="tally_name" name="TallyName" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="tally_name" name="TallyName" class="form-control" {% if 'TallyName' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Inst Remarks</label>
-                        <input type="text" id="inst_remarks" name="InstRemarks" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="inst_remarks" name="InstRemarks" class="form-control" {% if 'InstRemarks' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Bill Given HOD</label>
-                        <input type="text" id="bill_given_hod" name="BillGivenHOD" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="bill_given_hod" name="BillGivenHOD" class="form-control" {% if 'BillGivenHOD' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Bill Recd From HOD</label>
-                        <input type="text" id="bill_recd_hod" name="BillRecdFromHOD" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="bill_recd_hod" name="BillRecdFromHOD" class="form-control" {% if 'BillRecdFromHOD' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Bill Submitted to Acct Date</label>
-                        <input type="date" id="bill_submitted_acct_date" name="BillSubmittedToAcctDate" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="date" id="bill_submitted_acct_date" name="BillSubmittedToAcctDate" class="form-control" {% if 'BillSubmittedToAcctDate' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                 </div>
             </div>
@@ -215,51 +211,51 @@
                 <div class="row">
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Account Number</label>
-                        <input type="text" id="account_number" name="AccountNumber" class="form-control" readonly>
+                        <input type="text" id="account_number" name="AccountNumber" class="form-control" {% if 'AccountNumber' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Bank Name</label>
-                        <input type="text" id="bank_name" name="BankName" class="form-control" readonly>
+                        <input type="text" id="bank_name" name="BankName" class="form-control" {% if 'BankName' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">IFSC Code</label>
-                        <input type="text" id="ifsc_code" name="IFSCCode" class="form-control" readonly>
+                        <input type="text" id="ifsc_code" name="IFSCCode" class="form-control" {% if 'IFSCCode' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">PAN Number</label>
-                        <input type="text" id="pan_number" name="PANNumber" class="form-control" style="text-transform:uppercase;" readonly>
+                        <input type="text" id="pan_number" name="PANNumber" class="form-control" style="text-transform:uppercase;" {% if 'PANNumber' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">TDS</label>
-                        <input type="text" id="tds" name="TDS" class="form-control" readonly>
+                        <input type="text" id="tds" name="TDS" class="form-control" {% if 'TDS' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">EWT</label>
-                        <input type="text" id="ewt" name="EWT" class="form-control" readonly>
+                        <input type="text" id="ewt" name="EWT" class="form-control" {% if 'EWT' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">GST</label>
-                        <input type="text" id="gst" name="GST" class="form-control" readonly>
+                        <input type="text" id="gst" name="GST" class="form-control" {% if 'GST' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Payable Amount</label>
-                        <input type="number" id="payable_amount" name="PayableAmount" class="form-control" step="0.01" readonly>
+                        <input type="number" id="payable_amount" name="PayableAmount" class="form-control" step="0.01" {% if 'PayableAmount' not in allowed_billing_fields %}readonly{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">Payment Date</label>
-                        <input type="date" id="payment_date" name="PaymentDate" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="date" id="payment_date" name="PaymentDate" class="form-control" {% if 'PaymentDate' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">UTR Number</label>
-                        <input type="text" id="utr_number" name="UTRNumber" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="utr_number" name="UTRNumber" class="form-control" {% if 'UTRNumber' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Status Info</label>
-                        <input type="text" id="status_info" name="StatusInfo" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="status_info" name="StatusInfo" class="form-control" {% if 'StatusInfo' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Acct Remarks</label>
-                        <input type="text" id="acct_remarks" name="AcctRemarks" class="form-control" {% if not can_edit_billing_tracking %}disabled{% endif %}>
+                        <input type="text" id="acct_remarks" name="AcctRemarks" class="form-control" {% if 'AcctRemarks' not in allowed_billing_fields %}disabled{% endif %}>
                     </div>
                 </div>
             </div>
@@ -310,7 +306,10 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    window.billingPermissions = { canEditBillingTracking: {{ 'true' if can_edit_billing_tracking else 'false' }} };
+    window.billingPermissions = {
+        canEditBillingTracking: {{ 'true' if can_edit_billing_tracking else 'false' }},
+        allowedFields: {{ allowed_billing_fields | list | tojson }}
+    };
     window.hiddenFormFields = {{ hidden_fields | tojson }};
     window.formFieldSettings = {{ field_settings | tojson }};
 </script>

@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: contractor-billing
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_5002.py
+    healthCheckPath: /health
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: DB_SERVER
+        sync: false
+      - key: DB_PORT
+        value: "1433"
+      - key: DB_DATABASE
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false

@@ -9,7 +9,12 @@ context and closed automatically when the request ends, so a route that raises
 part way through cannot leak its connection.
 """
 
+import os
+
 import pytds
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from flask import g, has_app_context
@@ -121,12 +126,20 @@ def close_tracked_connections(exc=None):
 
 
 def get_connection():
+    required_settings = ("DB_SERVER", "DB_DATABASE", "DB_USER", "DB_PASSWORD")
+    missing_settings = [name for name in required_settings if not os.environ.get(name)]
+    if missing_settings:
+        raise RuntimeError(
+            "Missing database configuration: " + ", ".join(missing_settings) + ". "
+            "Set these in the environment or .env file."
+        )
+
     connection = pytds.connect(
-        server="103.27.232.66",
-        port=1433,
-        database="GSMMaster",
-        user="ankush",
-        password="9E4qI*4L>w|#2!Sz^u%",
+        server=os.environ["DB_SERVER"],
+        port=int(os.environ.get("DB_PORT", "1433")),
+        database=os.environ["DB_DATABASE"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
         login_timeout=10,
         timeout=30,
         enc_login_only=True,

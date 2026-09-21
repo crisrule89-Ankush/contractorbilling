@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Permissions | {{ app_settings.brand_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        body { background:#f4f6f9; font-family:Segoe UI,sans-serif; }
+        .navbar { background:#003366; } .navbar-brand,.user-info { color:#fff!important; }
+        .page-title,.card { background:#fff; border:0; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+        .page-title { padding:20px; margin:20px 0; } .card-header { background:#0B5394; color:#fff; font-weight:700; }
+        .permission-check { width:1.25rem; height:1.25rem; cursor:pointer; }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg"><div class="container-fluid">
+    <span class="navbar-brand fs-4 fw-bold"><i class="fa-solid fa-building"></i> {{ app_settings.brand_name }}</span>
+    <div class="user-info text-end"><b>{{ username }}</b><br>{{ branch }}</div>
+</div></nav>
+<div class="container-fluid px-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, msg in messages %}
+    <div class="alert alert-{{ category }} alert-dismissible fade show mt-3" role="alert">{{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+    {% endfor %}{% endwith %}
+    <div class="page-title"><h3><i class="fa fa-user-shield"></i> Page Permissions</h3>
+        <p class="text-muted mb-0">Assign Contractor Master and Billing Schedule permissions for a UserLogin user.</p></div>
+    <form method="get" class="card mb-3"><div class="card-body row align-items-end g-3">
+        <div class="col-md-6"><label class="form-label fw-semibold">User Name</label>
+            <select name="user_name" class="form-select" onchange="this.form.submit()">
+                {% for user in users %}<option value="{{ user }}" {% if user == selected_user %}selected{% endif %}>{{ user }}</option>{% endfor %}
+            </select>
+        </div>
+    </div></form>
+    {% if selected_user %}
+    <form method="post" class="card"><div class="card-header">Access for {{ selected_user }}</div><div class="card-body">
+        <input type="hidden" name="user_name" value="{{ selected_user }}">
+        <div class="table-responsive"><table class="table table-bordered align-middle mb-4"><thead class="table-light"><tr>
+            <th>Page</th><th class="text-center">Visible</th><th class="text-center">Add</th><th class="text-center">Edit</th><th class="text-center">Delete</th>
+        </tr></thead><tbody>
+        {% for page_name, page_label in page_permissions.items() %}{% set access = saved_permissions.get(page_name, {}) %}
+        <tr><td class="fw-semibold">{{ page_label }}</td>
+            {% for action in ['view', 'add', 'edit', 'delete'] %}<td class="text-center"><input class="form-check-input permission-check" type="checkbox" name="{{ page_name }}_{{ action }}" {% if access.get(action) %}checked{% endif %}></td>{% endfor %}
+        </tr>{% endfor %}
+        </tbody></table></div>
+        <div class="d-flex gap-2"><button class="btn btn-success"><i class="fa fa-save"></i> Save Permissions</button><a href="/field_manager" class="btn btn-dark">Back to Form Fields</a></div>
+    </div></form>{% endif %}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body></html>

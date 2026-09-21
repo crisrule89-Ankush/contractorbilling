@@ -5,10 +5,14 @@ idle keep-alive connections, which makes Apache's pooled backend sockets go
 stale and return 502 "error reading status line" (AH01102).
 """
 
+import os
+
 from app import app
 
-HOST = "127.0.0.1"
-PORT = 5002
+# Local use stays on 127.0.0.1:5002. Render supplies PORT and requires the
+# service to listen on every interface, so use 0.0.0.0 whenever PORT is set.
+PORT = int(os.environ.get("PORT", "5002"))
+HOST = os.environ.get("HOST") or ("0.0.0.0" if "PORT" in os.environ else "127.0.0.1")
 
 if __name__ == "__main__":
     try:

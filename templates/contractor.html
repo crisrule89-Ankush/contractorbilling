@@ -18,6 +18,7 @@
         .required { color: red; }
         input, select { height: 42px; }
         .btn-custom { min-width: 140px; }
+        .action-bar { position: sticky; top: 0; z-index: 1020; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
     </style>
 </head>
 <body>
@@ -30,22 +31,25 @@
     </div>
 </nav>
 <div class="container-fluid px-4">
+    <div id="alertContainer" class="sticky-top"></div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}{% for category, msg in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show mt-3" role="alert">{{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>
+    {% endfor %}{% endif %}{% endwith %}
     <div class="page-title">
         <h3><i class="fa-solid fa-users"></i> Contractor Master</h3>
         <p class="text-muted">Create / Update / Search Contractor Details</p>
     </div>
-    <div id="alertContainer"></div>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        {% for category, msg in messages %}
-            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                {{ msg }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-    {% endwith %}
     <form id="contractorForm" action="/save_contractor" method="POST">
+        <div class="card action-bar mb-3"><div class="card-body text-center py-3">
+            <button type="button" class="btn btn-primary me-2 btn-custom" id="btnNew"><i class="fa fa-plus"></i> New</button>
+            <button type="submit" class="btn btn-success me-2 btn-custom" id="btnSave" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-save"></i> Save</button>
+            <button type="button" class="btn btn-warning me-2 btn-custom" id="btnUpdate" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-edit"></i> Update</button>
+            <button type="button" class="btn btn-danger me-2 btn-custom" id="btnDelete" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-trash"></i> Delete</button>
+            <button type="button" class="btn btn-info me-2 btn-custom" id="btnSearch"><i class="fa fa-search"></i> Search</button>
+            <button type="reset" class="btn btn-secondary me-2 btn-custom"><i class="fa fa-eraser"></i> Clear</button>
+            <a href="/dashboard" class="btn btn-dark btn-custom"><i class="fa fa-arrow-left"></i> Back</a>
+        </div></div>
         <div class="card">
             <div class="card-header">General Details</div>
             <div class="card-body">
@@ -298,17 +302,6 @@
                 </div>
             </div>
         </div>
-        <div class="card">
-            <div class="card-body text-center">
-                <button type="button" class="btn btn-primary btn-lg me-2 btn-custom" id="btnNew"><i class="fa fa-plus"></i> New</button>
-                <button type="submit" class="btn btn-success btn-lg me-2 btn-custom" id="btnSave" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-save"></i> Save</button>
-                <button type="button" class="btn btn-warning btn-lg me-2 btn-custom" id="btnUpdate" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-edit"></i> Update</button>
-                <button type="button" class="btn btn-danger btn-lg me-2 btn-custom" id="btnDelete" {% if not is_admin %}disabled title="Admin login required"{% endif %}><i class="fa fa-trash"></i> Delete</button>
-                <button type="button" class="btn btn-info btn-lg me-2 btn-custom" id="btnSearch"><i class="fa fa-search"></i> Search</button>
-                <button type="reset" class="btn btn-secondary btn-lg me-2 btn-custom"><i class="fa fa-eraser"></i> Clear</button>
-                <a href="/dashboard" class="btn btn-dark btn-lg btn-custom"><i class="fa fa-arrow-left"></i> Back</a>
-            </div>
-        </div>
     </form>
 </div>
 <div class="modal fade" id="searchModal" tabindex="-1" aria-labelledby="searchModalLabel" aria-hidden="true">
@@ -365,6 +358,7 @@
 <script>
     window.hiddenFormFields = {{ hidden_fields | tojson }};
     window.formFieldSettings = {{ field_settings | tojson }};
+    window.formFieldConfigs = {{ field_configs | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/form_fields.js') }}"></script>
 <script src="{{ url_for('static', filename='js/contractor.js') }}"></script>
