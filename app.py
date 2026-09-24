@@ -285,8 +285,8 @@ def can_bulk_upload_masters():
 
 
 def can_bulk_update_billing():
-    """Only the billing owners and admin-role users may upload billing changes."""
-    return is_billing_admin_user() or is_sandesh_or_uday_user()
+    """Any authenticated login may use the branch-scoped billing uploader."""
+    return bool(session.get("username"))
 
 
 def get_billing_bulk_allowed_fields():
@@ -298,7 +298,7 @@ def get_billing_bulk_allowed_fields():
         return set(UDAY_ALLOWED_FIELDS)
     if is_billing_admin_user():
         return None  # Admin may use every ordinary, writable table column.
-    return set()
+    return set(BRANCH_ALLOWED_FIELDS)
 
 
 def get_billing_bulk_columns(table_columns=None):
@@ -325,7 +325,7 @@ def get_billing_bulk_columns(table_columns=None):
 
 def require_billing_bulk_upload_redirect(target="/billing"):
     if not can_bulk_update_billing():
-        flash("Bulk upload is available only to Sandesh, Uday, and users with the admin role.", "danger")
+        flash("Please log in to use billing bulk upload.", "danger")
         return redirect(target)
     return None
 
@@ -1665,6 +1665,12 @@ def build_billing_bulk_records(raw_rows, columns, metadata):
         for key_column in ("ContractorCode", "BillNoDebRemarks"):
             if not str(record.get(key_column) or "").strip():
                 raise ValueError(f"Row {row_number}: {key_column} is required.")
+        uploaded_branch = str(record.get("BranchName") or "").strip()
+        user_branch = str(session.get("branch") or "").strip()
+        if uploaded_branch and uploaded_branch.casefold() != user_branch.casefold():
+            raise ValueError(f"Row {row_number}: billing uploads are limited to your branch ({user_branch}).")
+        if "BranchName" in permitted_columns:
+            record["BranchName"] = user_branch
     return records
 
 
@@ -1679,35 +1685,40 @@ def prepare_billing_bulk_new_record(cursor, record):
     record["ContractorCode"] = contractor_code
     record["BillNoDebRemarks"] = str(record.get("BillNoDebRemarks") or "").strip()
     apply_contractor_master_fields(record, contractor)
-    if not str(record.get("BranchName") or "").strip():
-        record["BranchName"] = (session.get("branch") or "").strip()
-    record["Uniquekey"] = make_billing_unique_key(
+    # Bulk uploads are scoped to the logged-in user's branch, even if an
+    # uploaded spreadsheet contains a different BranchName value.
+    record["BranchName"] = (session.get("branch") or "").strip()
+    branch_login_name = (session.get("username") or "").strip()
+    upload_time = datetime.now()
+    record["ContractorLocation"] = branch_login_name
+    # Keep the key's spelling identical to the SQL column name. The bulk
+    # insert matches record keys to table metadata with case-sensitive Python
+    # comparisons, even though the SQL Server identifiers are case-insensitive.
+    record["UniqueKey"] = make_billing_unique_key(
         record["ContractorCode"], record["BillNoDebRemarks"]
     )
-    record["CreatedBy"] = session.get("username", "")
-    record["CreatedDate"] = datetime.now()
-    record["ModifiedBy"] = session.get("username", "")
-    record["ModifiedDate"] = datetime.now()
+    record["CreatedBy"] = branch_login_name
+    record["CreatedDate"] = upload_time
+    record["ModifiedBy"] = branch_login_name
+    record["ModifiedDate"] = upload_time
     prepare_bulk_record("billing", record)
     return record, None
 
 
 def process_billing_bulk_upload(records):
-    """Upsert billing rows by ContractorCode + BillNoDebRemarks only."""
-    allowed_fields = get_billing_bulk_allowed_fields()
-
+    """Insert new branch-scoped billing rows; skip existing unique keys."""
     conn = get_connection()
     cursor = conn.cursor()
-    summary = {"saved": 0, "updated": 0, "skipped": []}
+    summary = {"saved": 0, "skipped": []}
     try:
         table_columns, _ = get_bulk_upload_columns(cursor, "billing")
-        table_column_set = set(table_columns)
         uploaded_keys = set()
 
         for row_number, uploaded_record in records:
             contractor_code = str(uploaded_record.get("ContractorCode") or "").strip()
             bill_no = str(uploaded_record.get("BillNoDebRemarks") or "").strip()
-            key = (contractor_code.casefold(), bill_no.casefold())
+            unique_key = make_billing_unique_key(contractor_code, bill_no)
+            key = unique_key.casefold()
             if key in uploaded_keys:
                 summary["skipped"].append(f"Row {row_number}: duplicate ContractorCode + BillNo in this file.")
                 continue
@@ -1716,57 +1727,35 @@ def process_billing_bulk_upload(records):
             cursor.execute(
                 """
                 SELECT BillingID FROM AdBillingMaster
-                WHERE LTRIM(RTRIM(ContractorCode)) = ?
-                  AND LTRIM(RTRIM(BillNoDebRemarks)) = ?
+                WHERE LTRIM(RTRIM(UniqueKey)) = ?
                 """,
-                (contractor_code, bill_no)
+                (unique_key,)
             )
             existing = cursor.fetchone()
-
-            if not existing:
-                record, error = prepare_billing_bulk_new_record(cursor, uploaded_record)
-                if error:
-                    summary["skipped"].append(f"Row {row_number}: {error}")
-                    continue
-                validation_error = validate_billing_data(record)
-                if validation_error:
-                    summary["skipped"].append(f"Row {row_number}: {validation_error}")
-                    continue
-
-                insert_columns = [column for column in table_columns if column in record]
-                cursor.execute(
-                    "INSERT INTO AdBillingMaster ({columns}) VALUES ({placeholders})".format(
-                        columns=", ".join(bracket_identifier(column) for column in insert_columns),
-                        placeholders=", ".join(["?"] * len(insert_columns))
-                    ),
-                    [record[column] for column in insert_columns]
+            if existing:
+                summary["skipped"].append(
+                    f"Row {row_number}: UniqueKey '{unique_key}' already exists."
                 )
-                summary["saved"] += 1
                 continue
 
-            # Blank update cells deliberately leave the stored value unchanged.
-            # This keeps a downloaded role-specific template safe to reuse.
-            update_columns = [
-                column for column in uploaded_record
-                if column in table_column_set
-                and column not in {"ContractorCode", "BillNoDebRemarks"}
-                and (allowed_fields is None or column in allowed_fields)
-                and uploaded_record[column] is not None
-            ]
-            if not update_columns:
-                summary["skipped"].append(f"Row {row_number}: no permitted values to update.")
+            record, error = prepare_billing_bulk_new_record(cursor, uploaded_record)
+            if error:
+                summary["skipped"].append(f"Row {row_number}: {error}")
+                continue
+            validation_error = validate_billing_data(record)
+            if validation_error:
+                summary["skipped"].append(f"Row {row_number}: {validation_error}")
                 continue
 
-            update_columns.extend(["ModifiedBy", "ModifiedDate"])
-            update_values = [uploaded_record[column] for column in update_columns[:-2]]
-            update_values.extend([session.get("username", ""), datetime.now(), existing.BillingID])
+            insert_columns = [column for column in table_columns if column in record]
             cursor.execute(
-                "UPDATE AdBillingMaster SET {assignments} WHERE BillingID = ?".format(
-                    assignments=", ".join(f"{bracket_identifier(column)} = ?" for column in update_columns)
+                "INSERT INTO AdBillingMaster ({columns}) VALUES ({placeholders})".format(
+                    columns=", ".join(bracket_identifier(column) for column in insert_columns),
+                    placeholders=", ".join(["?"] * len(insert_columns))
                 ),
-                update_values
+                [record[column] for column in insert_columns]
             )
-            summary["updated"] += 1
+            summary["saved"] += 1
 
         conn.commit()
         return summary
@@ -2277,7 +2266,7 @@ def billing_bulk_upload():
                 summary = process_billing_bulk_upload(records)
                 message = (
                     f"{summary['saved']} new billing record(s) saved and "
-                    f"{summary['updated']} existing billing record(s) updated."
+                    f"{len(summary['skipped'])} row(s) skipped."
                 )
                 if summary["skipped"]:
                     message += " Skipped: " + " | ".join(summary["skipped"])
@@ -2335,7 +2324,14 @@ def billing_bulk_upload_template():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM AdBillingMaster ORDER BY BillingID")
+        cursor.execute(
+            """
+            SELECT * FROM AdBillingMaster
+            WHERE LTRIM(RTRIM(BranchName)) = ?
+            ORDER BY BillingID
+            """,
+            ((session.get("branch") or "").strip(),)
+        )
         for row in cursor.fetchall():
             sheet.append([clean_export_value(getattr(row, column, None)) for column in columns])
     finally:
