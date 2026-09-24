@@ -289,6 +289,11 @@ def can_bulk_update_billing():
     return bool(session.get("username"))
 
 
+def can_bulk_upload_all_branches():
+    """Billing owners and full admins may work with records across branches."""
+    return is_sandesh_or_uday_user() or is_billing_admin_user()
+
+
 def get_billing_bulk_allowed_fields():
     """Return fields that the current user may supply in a billing upload."""
     normalized_user = normalize_login_value(session.get("username"))
@@ -1667,9 +1672,10 @@ def build_billing_bulk_records(raw_rows, columns, metadata):
                 raise ValueError(f"Row {row_number}: {key_column} is required.")
         uploaded_branch = str(record.get("BranchName") or "").strip()
         user_branch = str(session.get("branch") or "").strip()
-        if uploaded_branch and uploaded_branch.casefold() != user_branch.casefold():
+        all_branches = can_bulk_upload_all_branches()
+        if not all_branches and uploaded_branch and uploaded_branch.casefold() != user_branch.casefold():
             raise ValueError(f"Row {row_number}: billing uploads are limited to your branch ({user_branch}).")
-        if "BranchName" in permitted_columns:
+        if not all_branches and "BranchName" in permitted_columns:
             record["BranchName"] = user_branch
     return records
 
@@ -1685,9 +1691,10 @@ def prepare_billing_bulk_new_record(cursor, record):
     record["ContractorCode"] = contractor_code
     record["BillNoDebRemarks"] = str(record.get("BillNoDebRemarks") or "").strip()
     apply_contractor_master_fields(record, contractor)
-    # Bulk uploads are scoped to the logged-in user's branch, even if an
-    # uploaded spreadsheet contains a different BranchName value.
-    record["BranchName"] = (session.get("branch") or "").strip()
+    # Ordinary branch logins stay within their own branch. Billing owners and
+    # admins may create a record for the branch listed in their upload.
+    if not can_bulk_upload_all_branches() or not str(record.get("BranchName") or "").strip():
+        record["BranchName"] = (session.get("branch") or "").strip()
     branch_login_name = (session.get("username") or "").strip()
     upload_time = datetime.now()
     record["ContractorLocation"] = branch_login_name
@@ -1706,10 +1713,12 @@ def prepare_billing_bulk_new_record(cursor, record):
 
 
 def process_billing_bulk_upload(records):
-    """Insert new branch-scoped billing rows; skip existing unique keys."""
+    """Insert new rows or update an existing key's permitted fields."""
+    allowed_fields = get_billing_bulk_allowed_fields()
+    all_branches = can_bulk_upload_all_branches()
     conn = get_connection()
     cursor = conn.cursor()
-    summary = {"saved": 0, "skipped": []}
+    summary = {"saved": 0, "updated": 0, "skipped": []}
     try:
         table_columns, _ = get_bulk_upload_columns(cursor, "billing")
         uploaded_keys = set()
@@ -1726,16 +1735,50 @@ def process_billing_bulk_upload(records):
 
             cursor.execute(
                 """
-                SELECT BillingID FROM AdBillingMaster
+                SELECT BillingID, BranchName FROM AdBillingMaster
                 WHERE LTRIM(RTRIM(UniqueKey)) = ?
                 """,
                 (unique_key,)
             )
             existing = cursor.fetchone()
             if existing:
-                summary["skipped"].append(
-                    f"Row {row_number}: UniqueKey '{unique_key}' already exists."
+                existing_branch = str(getattr(existing, "BranchName", "") or "").strip()
+                user_branch = str(session.get("branch") or "").strip()
+                if not all_branches and existing_branch.casefold() != user_branch.casefold():
+                    summary["skipped"].append(
+                        f"Row {row_number}: matching billing entry belongs to another branch."
+                    )
+                    continue
+
+                update_columns = [
+                    column for column in uploaded_record
+                    if column in table_columns
+                    and column not in {
+                        "BillingID", "ContractorCode", "BillNoDebRemarks", "UniqueKey",
+                        "CreatedBy", "CreatedDate", "ModifiedBy", "ModifiedDate"
+                    }
+                    and (allowed_fields is None or column in allowed_fields)
+                    and uploaded_record[column] is not None
+                ]
+                if not update_columns:
+                    summary["skipped"].append(
+                        f"Row {row_number}: no permitted nonblank values to update for UniqueKey '{unique_key}'."
+                    )
+                    continue
+
+                update_time = datetime.now()
+                update_columns.extend(["ModifiedBy", "ModifiedDate"])
+                update_values = [uploaded_record[column] for column in update_columns[:-2]]
+                update_values.extend([
+                    (session.get("username") or "").strip(), update_time, existing.BillingID
+                ])
+                cursor.execute(
+                    "UPDATE AdBillingMaster SET {assignments} WHERE BillingID = ?".format(
+                        assignments=", ".join(f"{bracket_identifier(column)} = ?" for column in update_columns)
+                    ),
+                    update_values
                 )
+                summary["updated"] += 1
                 continue
 
             record, error = prepare_billing_bulk_new_record(cursor, uploaded_record)
@@ -2266,6 +2309,7 @@ def billing_bulk_upload():
                 summary = process_billing_bulk_upload(records)
                 message = (
                     f"{summary['saved']} new billing record(s) saved and "
+                    f"{summary['updated']} existing billing record(s) updated; "
                     f"{len(summary['skipped'])} row(s) skipped."
                 )
                 if summary["skipped"]:
@@ -2292,6 +2336,7 @@ def billing_bulk_upload():
         username=session["username"],
         branch=session.get("branch", ""),
         columns=get_billing_bulk_columns(table_columns),
+        all_branches=can_bulk_upload_all_branches(),
         is_admin=is_admin_user()
     )
 
@@ -2324,14 +2369,17 @@ def billing_bulk_upload_template():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM AdBillingMaster
-            WHERE LTRIM(RTRIM(BranchName)) = ?
-            ORDER BY BillingID
-            """,
-            ((session.get("branch") or "").strip(),)
-        )
+        if can_bulk_upload_all_branches():
+            cursor.execute("SELECT * FROM AdBillingMaster ORDER BY BillingID")
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM AdBillingMaster
+                WHERE LTRIM(RTRIM(BranchName)) = ?
+                ORDER BY BillingID
+                """,
+                ((session.get("branch") or "").strip(),)
+            )
         for row in cursor.fetchall():
             sheet.append([clean_export_value(getattr(row, column, None)) for column in columns])
     finally:

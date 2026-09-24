@@ -37,8 +37,13 @@
             {% endfor %}{% endif %}{% endwith %}
 
             <div class="alert alert-info">
-                <strong>Row key:</strong> ContractorCode + BillNoDebRemarks. The downloaded template is prefilled with billing records from every branch and contains only the fields available to your login.
-                When uploaded, an existing key updates its permitted fields; a new key creates a billing entry. Blank update cells are left unchanged.
+                <strong>Row key:</strong> ContractorCode + BillNoDebRemarks.
+                {% if all_branches %}
+                The downloaded template is prefilled with billing records from every branch.
+                {% else %}
+                The downloaded template is prefilled with billing records from your branch.
+                {% endif %}
+                It contains only the fields available to your login. When uploaded, an existing key updates its permitted fields; a new key creates a billing entry. Blank update cells are left unchanged.
             </div>
             <div class="row g-4">
                 <div class="col-lg-7">
