@@ -1060,13 +1060,17 @@ def get_contractor_dict(row):
     return data
 
 
-def validate_billing_data(data):
+def validate_billing_data(data, validate_contact=True):
     required = get_effective_required_fields("billing")
     for field in required:
         if not data.get(field):
             return f"{field} is required."
 
-    if data.get("ContractorContactNo") and not data["ContractorContactNo"].isdigit():
+    if (
+        validate_contact
+        and data.get("ContractorContactNo")
+        and not str(data["ContractorContactNo"]).isdigit()
+    ):
         return "Contractor Contact No must contain only digits."
 
     if data.get("BillAmount"):
@@ -1690,7 +1694,12 @@ def prepare_billing_bulk_new_record(cursor, record):
     record = dict(record)
     record["ContractorCode"] = contractor_code
     record["BillNoDebRemarks"] = str(record.get("BillNoDebRemarks") or "").strip()
+    uploaded_contact = record.get("ContractorContactNo")
     apply_contractor_master_fields(record, contractor)
+    # Keep an explicit contact value from the upload. If the cell is blank,
+    # apply_contractor_master_fields supplies the contractor's master value.
+    if uploaded_contact not in (None, ""):
+        record["ContractorContactNo"] = uploaded_contact
     # Ordinary branch logins stay within their own branch. Billing owners and
     # admins may create a record for the branch listed in their upload.
     if not can_bulk_upload_all_branches() or not str(record.get("BranchName") or "").strip():
@@ -1785,7 +1794,9 @@ def process_billing_bulk_upload(records):
             if error:
                 summary["skipped"].append(f"Row {row_number}: {error}")
                 continue
-            validation_error = validate_billing_data(record)
+            # Bulk uploads should preserve any contact value supplied in the
+            # template (for example, a country code or extension).
+            validation_error = validate_billing_data(record, validate_contact=False)
             if validation_error:
                 summary["skipped"].append(f"Row {row_number}: {validation_error}")
                 continue
