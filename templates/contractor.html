@@ -20,8 +20,9 @@
         .btn-custom { min-width: 140px; }
         .action-bar { position: sticky; top: 0; z-index: 1020; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
     </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/portal.css', v=4) }}">
 </head>
-<body>
+<body class="theme-contractors">
 <nav class="navbar navbar-expand-lg">
     <div class="container-fluid">
         <span class="navbar-brand"><i class="fa-solid fa-building"></i> {{ app_settings.brand_name }}</span>

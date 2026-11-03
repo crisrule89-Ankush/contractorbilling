@@ -29,8 +29,9 @@
         .btn-custom { min-width: 140px; }
         .color-input { min-height: 42px; padding: 4px; }
     </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/portal.css', v=4) }}">
 </head>
-<body>
+<body class="theme-branding">
 <nav class="navbar navbar-expand-lg">
     <div class="container-fluid">
         <span class="navbar-brand">{{ app_settings.brand_name }}</span>

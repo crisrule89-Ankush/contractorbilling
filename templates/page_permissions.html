@@ -13,8 +13,9 @@
         .page-title { padding:20px; margin:20px 0; } .card-header { background:#0B5394; color:#fff; font-weight:700; }
         .permission-check { width:1.25rem; height:1.25rem; cursor:pointer; }
     </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/portal.css', v=4) }}">
 </head>
-<body>
+<body class="theme-access">
 <nav class="navbar navbar-expand-lg"><div class="container-fluid">
     <span class="navbar-brand fs-4 fw-bold"><i class="fa-solid fa-building"></i> {{ app_settings.brand_name }}</span>
     <div class="user-info text-end"><b>{{ username }}</b><br>{{ branch }}</div>
