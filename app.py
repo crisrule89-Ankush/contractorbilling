@@ -901,7 +901,9 @@ def apply_contractor_master_fields(billing_data, contractor):
     billing_data["ContractorCode"] = contractor.ContractorCode or billing_data.get("ContractorCode")
     billing_data["ContractorAgencyName"] = contractor.LedgerName or billing_data.get("ContractorAgencyName")
     billing_data["ContractorEmailID"] = contractor.EmailID or billing_data.get("ContractorEmailID")
-    billing_data["ContractorContactNo"] = contractor.MobileNo or billing_data.get("ContractorContactNo")
+    # Keep an explicitly supplied billing contact value; fall back to the
+    # contractor master only when the billing field is empty.
+    billing_data["ContractorContactNo"] = billing_data.get("ContractorContactNo") or contractor.MobileNo
     billing_data["OwnerName"] = contractor.OwnerName or billing_data.get("OwnerName")
     billing_data["AccountNumber"] = contractor.AccountNumber or billing_data.get("AccountNumber")
     billing_data["BankName"] = contractor.BankName or billing_data.get("BankName")
@@ -1060,18 +1062,11 @@ def get_contractor_dict(row):
     return data
 
 
-def validate_billing_data(data, validate_contact=True):
+def validate_billing_data(data):
     required = get_effective_required_fields("billing")
     for field in required:
         if not data.get(field):
             return f"{field} is required."
-
-    if (
-        validate_contact
-        and data.get("ContractorContactNo")
-        and not str(data["ContractorContactNo"]).isdigit()
-    ):
-        return "Contractor Contact No must contain only digits."
 
     if data.get("BillAmount"):
         try:
@@ -1796,7 +1791,7 @@ def process_billing_bulk_upload(records):
                 continue
             # Bulk uploads should preserve any contact value supplied in the
             # template (for example, a country code or extension).
-            validation_error = validate_billing_data(record, validate_contact=False)
+            validation_error = validate_billing_data(record)
             if validation_error:
                 summary["skipped"].append(f"Row {row_number}: {validation_error}")
                 continue
